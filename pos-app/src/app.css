@@ -1,0 +1,127 @@
+:root {
+	--bg: #f7f7f5;
+	--surface: #ffffff;
+	--border: #e5e5e2;
+	--text: #1f1f1d;
+	--text-muted: #767671;
+	--accent: #2f6e4f;
+	--accent-hover: #245a40;
+	--danger: #b3432f;
+
+	--radius: 10px;
+	--font: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+:root[data-theme='dark'] {
+	--bg: #1b1b19;
+	--surface: #232320;
+	--border: #35352f;
+	--text: #ededea;
+	--text-muted: #9a9a93;
+	--accent: #3f9268;
+	--accent-hover: #4ba876;
+	--danger: #d16a53;
+}
+
+body {
+	transition: background-color 0.15s, color 0.15s;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+}
+
+body {
+	font-family: var(--font);
+	background: var(--bg);
+	color: var(--text);
+	font-size: 15px;
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+	margin: 0 0 0.5em 0;
+	font-weight: 600;
+}
+
+button {
+	font-family: inherit;
+	font-size: 0.95rem;
+	cursor: pointer;
+	border-radius: var(--radius);
+	border: 1px solid var(--border);
+	background: var(--surface);
+	color: var(--text);
+	padding: 0.55em 1em;
+	transition: background-color 0.15s, border-color 0.15s;
+}
+
+button:hover {
+	background: #f0f0ee;
+}
+
+button.primary {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: #fff;
+}
+
+button.primary:hover {
+	background: var(--accent-hover);
+}
+
+input,
+select {
+	font-family: inherit;
+	font-size: 0.95rem;
+	padding: 0.55em 0.75em;
+	border-radius: var(--radius);
+	border: 1px solid var(--border);
+	background: var(--surface);
+	color: var(--text);
+}
+
+input:focus,
+select:focus,
+button:focus {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+th {
+	text-align: left;
+	font-size: 0.8rem;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--text-muted);
+	font-weight: 600;
+	padding: 0.6em 0.75em;
+	border-bottom: 1px solid var(--border);
+}
+
+td {
+	padding: 0.65em 0.75em;
+	border-bottom: 1px solid var(--border);
+	vertical-align: middle;
+}
+
+.card {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
