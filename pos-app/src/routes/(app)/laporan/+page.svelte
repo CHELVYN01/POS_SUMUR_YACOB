@@ -1,9 +1,18 @@
 <script lang="ts">
-	import { dummyPenjualan } from '$lib/data/dummy';
+	import { onMount } from 'svelte';
+	import { listPenjualan } from '$lib/db/penjualan';
+	import type { Penjualan } from '$lib/types';
 
+	let daftarPenjualan = $state<Penjualan[]>([]);
+	let loading = $state(true);
 	let expanded = $state<number | null>(null);
 
-	let totalHariIni = $derived(dummyPenjualan.reduce((sum, p) => sum + p.total, 0));
+	onMount(async () => {
+		daftarPenjualan = await listPenjualan();
+		loading = false;
+	});
+
+	let totalHariIni = $derived(daftarPenjualan.reduce((sum, p) => sum + p.total, 0));
 
 	function formatRupiah(n: number) {
 		return 'Rp' + n.toLocaleString('id-ID');
@@ -23,7 +32,7 @@
 	<div class="summary card">
 		<div>
 			<div class="summary-label">Total Transaksi</div>
-			<div class="summary-value">{dummyPenjualan.length}</div>
+			<div class="summary-value">{daftarPenjualan.length}</div>
 		</div>
 		<div>
 			<div class="summary-label">Total Penjualan Hari Ini</div>
@@ -42,26 +51,32 @@
 			</tr>
 		</thead>
 		<tbody>
-			{#each dummyPenjualan as p (p.id)}
-				<tr class="row" onclick={() => toggle(p.id)}>
-					<td>{p.tanggal}</td>
-					<td>{p.kasir}</td>
-					<td>{p.items.length}</td>
-					<td>{formatRupiah(p.total)}</td>
-					<td class="action">{expanded === p.id ? '▲' : '▼'}</td>
-				</tr>
-				{#if expanded === p.id}
-					<tr class="detail-row">
-						<td colspan="5">
-							<ul class="detail-list">
-								{#each p.items as item}
-									<li>{item.nama} × {item.jumlah} — {formatRupiah(item.harga * item.jumlah)}</li>
-								{/each}
-							</ul>
-						</td>
+			{#if loading}
+				<tr><td colspan="5" class="action" style="text-align: center;">Memuat data...</td></tr>
+			{:else if daftarPenjualan.length === 0}
+				<tr><td colspan="5" class="action" style="text-align: center;">Belum ada penjualan</td></tr>
+			{:else}
+				{#each daftarPenjualan as p (p.id)}
+					<tr class="row" onclick={() => toggle(p.id)}>
+						<td>{p.tanggal}</td>
+						<td>{p.kasir}</td>
+						<td>{p.items.length}</td>
+						<td>{formatRupiah(p.total)}</td>
+						<td class="action">{expanded === p.id ? '▲' : '▼'}</td>
 					</tr>
-				{/if}
-			{/each}
+					{#if expanded === p.id}
+						<tr class="detail-row">
+							<td colspan="5">
+								<ul class="detail-list">
+									{#each p.items as item}
+										<li>{item.nama} × {item.jumlah} — {formatRupiah(item.harga * item.jumlah)}</li>
+									{/each}
+								</ul>
+							</td>
+						</tr>
+					{/if}
+				{/each}
+			{/if}
 		</tbody>
 	</table>
 </div>

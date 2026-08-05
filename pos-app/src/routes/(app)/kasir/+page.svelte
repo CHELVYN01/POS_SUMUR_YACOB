@@ -1,18 +1,27 @@
 <script lang="ts">
-	import { dummyBarang } from '$lib/data/dummy';
-	import type { ItemPenjualan } from '$lib/types';
+	import { onMount } from 'svelte';
+	import { listBarang, cariBarangByBarcode } from '$lib/db/barang';
+	import { simpanPenjualan } from '$lib/db/penjualan';
+	import { currentUser } from '$lib/stores/session';
+	import type { Barang, ItemPenjualan } from '$lib/types';
 
 	let cari = $state('');
 	let scan = $state('');
 	let cart = $state<ItemPenjualan[]>([]);
+	let daftarBarang = $state<Barang[]>([]);
+	let membayar = $state(false);
+
+	onMount(async () => {
+		daftarBarang = await listBarang();
+	});
 
 	let barangFiltered = $derived(
-		dummyBarang.filter((b) => b.nama.toLowerCase().includes(cari.trim().toLowerCase()))
+		daftarBarang.filter((b) => b.nama.toLowerCase().includes(cari.trim().toLowerCase()))
 	);
 
 	let total = $derived(cart.reduce((sum, item) => sum + item.harga * item.jumlah, 0));
 
-	function tambah(barang: (typeof dummyBarang)[number]) {
+	function tambah(barang: Barang) {
 		const existing = cart.find((c) => c.barangId === barang.id);
 		if (existing) {
 			existing.jumlah += 1;
@@ -47,14 +56,28 @@
 		return 'Rp' + n.toLocaleString('id-ID');
 	}
 
-	function submitScan(event: Event) {
+	async function submitScan(event: Event) {
 		event.preventDefault();
 		const kode = scan.trim();
-		const barang =
-			dummyBarang.find((b) => b.barcode === kode) ??
-			dummyBarang.find((b) => b.nama.toLowerCase() === kode.toLowerCase());
+		if (!kode) return;
+
+		let barang = await cariBarangByBarcode(kode);
+		if (!barang) {
+			barang = daftarBarang.find((b) => b.nama.toLowerCase() === kode.toLowerCase()) ?? null;
+		}
 		if (barang) tambah(barang);
 		scan = '';
+	}
+
+	async function bayar() {
+		if (cart.length === 0 || !$currentUser) return;
+		membayar = true;
+		try {
+			await simpanPenjualan($currentUser.id, cart);
+			cart = [];
+		} finally {
+			membayar = false;
+		}
 	}
 </script>
 
@@ -112,8 +135,10 @@
 			</div>
 
 			<div class="cart-actions">
-				<button onclick={bersihkan}>Kosongkan</button>
-				<button class="primary">Bayar</button>
+				<button onclick={bersihkan} disabled={membayar}>Kosongkan</button>
+				<button class="primary" onclick={bayar} disabled={membayar || cart.length === 0}>
+					{membayar ? 'Menyimpan...' : 'Bayar'}
+				</button>
 			</div>
 		</div>
 	</section>

@@ -1,8 +1,10 @@
 <script lang="ts">
-	import { dummyBarang } from '$lib/data/dummy';
+	import { onMount } from 'svelte';
+	import { listBarang, tambahBarang, updateBarang, hapusBarang } from '$lib/db/barang';
 	import type { Barang } from '$lib/types';
 
-	let barangList = $state<Barang[]>([...dummyBarang]);
+	let barangList = $state<Barang[]>([]);
+	let loading = $state(true);
 
 	let barcode = $state('');
 	let nama = $state('');
@@ -12,6 +14,11 @@
 
 	let barcodeInput = $state<HTMLInputElement | null>(null);
 	let namaInput = $state<HTMLInputElement | null>(null);
+
+	onMount(async () => {
+		barangList = await listBarang();
+		loading = false;
+	});
 
 	function formatRupiah(n: number) {
 		return 'Rp' + n.toLocaleString('id-ID');
@@ -33,28 +40,22 @@
 		namaInput?.focus();
 	}
 
-	function simpan(event: Event) {
+	async function simpan(event: Event) {
 		event.preventDefault();
 		if (!nama.trim() || !harga) return;
 
 		const hargaNum = Number(harga);
 		const qtyNum = qty.trim() === '' ? null : Number(qty);
 		const barcodeVal = barcode.trim() === '' ? null : barcode.trim();
+		const input = { nama: nama.trim(), harga: hargaNum, qty: qtyNum, barcode: barcodeVal };
 
 		if (editId !== null) {
-			barangList = barangList.map((b) =>
-				b.id === editId
-					? { ...b, nama: nama.trim(), harga: hargaNum, qty: qtyNum, barcode: barcodeVal }
-					: b
-			);
+			await updateBarang(editId, input);
 		} else {
-			const nextId = Math.max(0, ...barangList.map((b) => b.id)) + 1;
-			barangList = [
-				...barangList,
-				{ id: nextId, nama: nama.trim(), harga: hargaNum, qty: qtyNum, barcode: barcodeVal }
-			];
+			await tambahBarang(input);
 		}
 
+		barangList = await listBarang();
 		resetForm();
 		barcodeInput?.focus();
 	}
@@ -67,8 +68,9 @@
 		qty = barang.qty === null ? '' : String(barang.qty);
 	}
 
-	function hapus(id: number) {
-		barangList = barangList.filter((b) => b.id !== id);
+	async function hapus(id: number) {
+		await hapusBarang(id);
+		barangList = await listBarang();
 		if (editId === id) resetForm();
 	}
 
@@ -126,18 +128,22 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#each barangList as barang (barang.id)}
-					<tr>
-						<td>{barang.nama}</td>
-						<td class="mono">{barang.barcode ?? '-'}</td>
-						<td>{formatRupiah(barang.harga)}</td>
-						<td>{barang.qty === null ? '-' : barang.qty}</td>
-						<td class="action">
-							<button onclick={() => edit(barang)}>Edit</button>
-							<button onclick={() => hapus(barang.id)}>Hapus</button>
-						</td>
-					</tr>
-				{/each}
+				{#if loading}
+					<tr><td colspan="5" class="empty">Memuat data...</td></tr>
+				{:else}
+					{#each barangList as barang (barang.id)}
+						<tr>
+							<td>{barang.nama}</td>
+							<td class="mono">{barang.barcode ?? '-'}</td>
+							<td>{formatRupiah(barang.harga)}</td>
+							<td>{barang.qty === null ? '-' : barang.qty}</td>
+							<td class="action">
+								<button onclick={() => edit(barang)}>Edit</button>
+								<button onclick={() => hapus(barang.id)}>Hapus</button>
+							</td>
+						</tr>
+					{/each}
+				{/if}
 			</tbody>
 		</table>
 	</section>
@@ -195,6 +201,12 @@
 		font-family: 'Consolas', 'SF Mono', monospace;
 		font-size: 0.85rem;
 		color: var(--text-muted);
+	}
+
+	.empty {
+		color: var(--text-muted);
+		text-align: center;
+		padding: 1.5rem 0;
 	}
 
 	.action {

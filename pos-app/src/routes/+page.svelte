@@ -1,21 +1,28 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { dummyUsers } from '$lib/data/dummy';
+	import { login as loginQuery } from '$lib/db/users';
 	import { currentUser } from '$lib/stores/session';
 
 	let username = $state('');
 	let password = $state('');
 	let error = $state('');
+	let loading = $state(false);
 
-	function login(event: Event) {
+	async function login(event: Event) {
 		event.preventDefault();
-		const user = dummyUsers.find((u) => u.username === username.trim());
-		if (!user || password.length === 0) {
-			error = 'Username atau password salah';
-			return;
+		loading = true;
+		error = '';
+		try {
+			const user = await loginQuery(username.trim(), password);
+			if (!user) {
+				error = 'Username atau password salah';
+				return;
+			}
+			currentUser.set(user);
+			goto('/kasir');
+		} finally {
+			loading = false;
 		}
-		currentUser.set(user);
-		goto('/kasir');
 	}
 </script>
 
@@ -25,14 +32,14 @@
 		<p class="subtitle">Masuk untuk mulai transaksi</p>
 
 		<label for="username">Username</label>
-		<input id="username" bind:value={username} placeholder="mis. admin" autocomplete="username" />
+		<input id="username" bind:value={username} placeholder="Masukkan username" autocomplete="username" />
 
 		<label for="password">Password</label>
 		<input
 			id="password"
 			type="password"
 			bind:value={password}
-			placeholder="bebas, ini masih dummy"
+			placeholder="Masukkan password"
 			autocomplete="current-password"
 		/>
 
@@ -40,9 +47,7 @@
 			<p class="error">{error}</p>
 		{/if}
 
-		<button type="submit" class="primary">Masuk</button>
-
-		<p class="hint">Coba: admin / siti / budi (password bebas)</p>
+		<button type="submit" class="primary" disabled={loading}>{loading ? 'Memeriksa...' : 'Masuk'}</button>
 	</form>
 </div>
 
@@ -84,12 +89,5 @@
 
 	button.primary {
 		margin-top: 1.4rem;
-	}
-
-	.hint {
-		margin: 1rem 0 0 0;
-		font-size: 0.75rem;
-		color: var(--text-muted);
-		text-align: center;
 	}
 </style>
