@@ -15,14 +15,31 @@
 	let membayar = $state(false);
 	let showInvoice = $state(false);
 	let log = $state<LogEntry[]>([]);
+	let scanInput = $state<HTMLInputElement | null>(null);
 
 	function catatLog(pesan: string) {
 		const waktu = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 		log = [{ waktu, pesan }, ...log].slice(0, 50);
 	}
 
-	onMount(async () => {
-		daftarBarang = await listBarang();
+	function refocusScan() {
+		if (showInvoice) return;
+		const active = document.activeElement;
+		const editable = active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA';
+		if (!editable) scanInput?.focus();
+	}
+
+	onMount(() => {
+		listBarang().then((data) => (daftarBarang = data));
+
+		const handler = () => setTimeout(refocusScan, 50);
+		document.addEventListener('focusout', handler);
+		document.addEventListener('mouseup', handler);
+
+		return () => {
+			document.removeEventListener('focusout', handler);
+			document.removeEventListener('mouseup', handler);
+		};
 	});
 
 	let barangFiltered = $derived(
@@ -112,6 +129,7 @@
 			<input
 				class="scan-input"
 				bind:value={scan}
+				bind:this={scanInput}
 				placeholder="Scan barcode atau ketik nama barang..."
 				autofocus
 			/>

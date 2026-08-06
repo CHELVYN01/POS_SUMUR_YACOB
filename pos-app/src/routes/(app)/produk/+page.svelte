@@ -26,9 +26,29 @@
 		log = [{ waktu, pesan }, ...log].slice(0, 50);
 	}
 
-	onMount(async () => {
-		barangList = await listBarang();
-		loading = false;
+	function refocusBarcode() {
+		const formKosong = editId === null && !barcode && !nama && harga === undefined && qty === undefined;
+		if (!formKosong) return;
+
+		const active = document.activeElement;
+		const editable = active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA';
+		if (!editable) barcodeInput?.focus();
+	}
+
+	onMount(() => {
+		listBarang().then((data) => {
+			barangList = data;
+			loading = false;
+		});
+
+		const handler = () => setTimeout(refocusBarcode, 50);
+		document.addEventListener('focusout', handler);
+		document.addEventListener('mouseup', handler);
+
+		return () => {
+			document.removeEventListener('focusout', handler);
+			document.removeEventListener('mouseup', handler);
+		};
 	});
 
 	function formatRupiah(n: number) {
