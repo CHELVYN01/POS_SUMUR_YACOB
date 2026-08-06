@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { currentUser } from '$lib/stores/session';
@@ -7,6 +8,13 @@
 	import { tokoInfo } from '$lib/stores/toko';
 
 	let { children } = $props();
+
+	onMount(() => {
+		const unsubscribe = currentUser.subscribe((user) => {
+			if (!user) goto('/');
+		});
+		return unsubscribe;
+	});
 
 	const menu = [
 		{
@@ -23,6 +31,11 @@
 			href: '/laporan',
 			label: 'List Penjualan',
 			icon: 'M6 3.5h9l3 3V20.5H6V3.5Z M9 9.5h6 M9 13h6 M9 16.5h4'
+		},
+		{
+			href: '/kasbon',
+			label: 'Kas Bon',
+			icon: 'M4 6.5h16v11H4z M4 10h16 M8 15.5h4'
 		}
 	];
 
