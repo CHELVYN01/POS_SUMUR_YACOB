@@ -23,7 +23,10 @@
 
 <div class="shell">
 	<aside class="sidebar">
-		<div class="brand">Kios Sumur Yacob</div>
+		<div class="brand">
+			<img src="/img/logo-bar.png" alt="Logo" class="brand-logo" />
+			<span>Kios Sumur Yacob</span>
+		</div>
 
 		<nav>
 			{#each menu as item (item.href)}
@@ -49,11 +52,23 @@
 			<h2 class="page-title">{judulHalaman}</h2>
 
 			<div class="navbar-actions">
-				<button class="icon-btn" onclick={toggleTheme} title="Ganti tema">
+				<button class="icon-btn" onclick={toggleTheme} title="Ganti tema" aria-label="Ganti tema">
 					{#if $theme === 'light'}
-						🌙
+						<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M21 12.5A8.5 8.5 0 1 1 11.5 3a7 7 0 0 0 9.5 9.5Z" />
+						</svg>
 					{:else}
-						☀️
+						<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+							<circle cx="12" cy="12" r="4.5" />
+							<line x1="12" y1="2" x2="12" y2="4.5" />
+							<line x1="12" y1="19.5" x2="12" y2="22" />
+							<line x1="2" y1="12" x2="4.5" y2="12" />
+							<line x1="19.5" y1="12" x2="22" y2="12" />
+							<line x1="4.9" y1="4.9" x2="6.6" y2="6.6" />
+							<line x1="17.4" y1="17.4" x2="19.1" y2="19.1" />
+							<line x1="4.9" y1="19.1" x2="6.6" y2="17.4" />
+							<line x1="17.4" y1="6.6" x2="19.1" y2="4.9" />
+						</svg>
 					{/if}
 				</button>
 			</div>
@@ -82,9 +97,19 @@
 	}
 
 	.brand {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
 		font-weight: 600;
 		font-size: 1rem;
 		padding: 0 0.5rem 1.25rem 0.5rem;
+	}
+
+	.brand-logo {
+		width: 28px;
+		height: 28px;
+		object-fit: contain;
+		flex-shrink: 0;
 	}
 
 	nav {
@@ -171,8 +196,11 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 1.05rem;
-		line-height: 1;
+		color: var(--text-muted);
+	}
+
+	.icon-btn:hover {
+		color: var(--text);
 	}
 
 	.content {

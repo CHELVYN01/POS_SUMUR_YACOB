@@ -67,7 +67,7 @@ button {
 }
 
 button:hover {
-	background: #f0f0ee;
+	background: var(--bg);
 }
 
 button.primary {

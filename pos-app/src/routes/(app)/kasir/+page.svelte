@@ -217,8 +217,8 @@
 		display: grid;
 		grid-template-columns: 1fr 320px;
 		gap: 1.5rem;
-		align-items: start;
 		height: calc(100vh - 56px - 4rem);
+		overflow: hidden;
 	}
 
 	.side-col {
@@ -226,6 +226,7 @@
 		flex-direction: column;
 		gap: 1.5rem;
 		height: 100%;
+		min-height: 0;
 	}
 
 	.cart {
