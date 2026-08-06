@@ -4,6 +4,7 @@
 	import { currentUser } from '$lib/stores/session';
 	import { theme, toggleTheme } from '$lib/stores/theme';
 	import { scanAktif } from '$lib/stores/scanStatus';
+	import { tokoInfo } from '$lib/stores/toko';
 
 	let { children } = $props();
 
@@ -40,7 +41,10 @@
 	<aside class="sidebar">
 		<div class="brand">
 			<img src="/img/logo-bar.png" alt="Logo" class="brand-logo" />
-			<span>Kios Sumur Yacob</span>
+			<span class="brand-nama">{$tokoInfo.nama}</span>
+			{#if $tokoInfo.alamat}
+				<span class="brand-alamat">{$tokoInfo.alamat}</span>
+			{/if}
 		</div>
 
 		<nav>
@@ -117,29 +121,50 @@
 	}
 
 	.sidebar {
-		width: 220px;
+		width: 260px;
 		flex-shrink: 0;
 		background: var(--surface);
 		border-right: 1px solid var(--border);
 		display: flex;
 		flex-direction: column;
-		padding: 1.25rem 1rem;
+		padding: 0 1rem 1.25rem 1rem;
 	}
 
 	.brand {
 		display: flex;
+		flex-direction: column;
 		align-items: center;
-		gap: 0.5rem;
+		justify-content: center;
+		gap: 0.6rem;
 		font-weight: 600;
 		font-size: 1rem;
-		padding: 0 0.5rem 1.25rem 0.5rem;
+		text-align: center;
+		height: 148px;
+		margin: 0 -1rem 1.25rem -1rem;
+		padding: 0 0.75rem;
+		background: linear-gradient(160deg, #003d38 0%, #002420 100%);
+		color: #fff;
 	}
 
 	.brand-logo {
-		width: 28px;
-		height: 28px;
+		width: 44px;
+		height: 44px;
 		object-fit: contain;
 		flex-shrink: 0;
+		border-radius: 10px;
+		background: rgba(255, 255, 255, 0.15);
+		padding: 6px;
+	}
+
+	.brand-nama {
+		line-height: 1.25;
+	}
+
+	.brand-alamat {
+		font-weight: 400;
+		font-size: 0.78rem;
+		color: rgba(255, 255, 255, 0.75);
+		line-height: 1.3;
 	}
 
 	nav {

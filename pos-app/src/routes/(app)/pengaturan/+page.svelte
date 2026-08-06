@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { listUsers, tambahUser, hapusUser, usernameTersedia } from '$lib/db/users';
 	import { currentUser } from '$lib/stores/session';
+	import { tokoInfo } from '$lib/stores/toko';
 	import type { User } from '$lib/types';
 
 	let users = $state<User[]>([]);
@@ -18,10 +19,21 @@
 
 	let isAdmin = $derived($currentUser?.role === 'admin');
 
+	let namaToko = $state($tokoInfo.nama);
+	let alamatToko = $state($tokoInfo.alamat);
+	let tokoTersimpan = $state(false);
+
 	onMount(async () => {
 		users = await listUsers();
 		loading = false;
 	});
+
+	function simpanToko(event: Event) {
+		event.preventDefault();
+		tokoInfo.set({ nama: namaToko.trim() || 'Kios Sumur Yacob', alamat: alamatToko.trim() });
+		tokoTersimpan = true;
+		setTimeout(() => (tokoTersimpan = false), 2000);
+	}
 
 	function bukaModal() {
 		formError = '';
@@ -73,6 +85,26 @@
 
 <div class="pengaturan">
 	<h1>Pengaturan</h1>
+
+	{#if isAdmin}
+		<section class="card section">
+			<h2>Info Toko</h2>
+			<form class="toko-form" onsubmit={simpanToko}>
+				<label for="nama-toko">Nama Toko</label>
+				<input id="nama-toko" bind:value={namaToko} placeholder="mis. Kios Sumur Yacob" />
+
+				<label for="alamat-toko">Alamat</label>
+				<input id="alamat-toko" bind:value={alamatToko} placeholder="mis. Jl. Sumur Yacob No. 1" />
+
+				<div class="toko-actions">
+					<button type="submit" class="primary">Simpan</button>
+					{#if tokoTersimpan}
+						<span class="saved-hint">Tersimpan</span>
+					{/if}
+				</div>
+			</form>
+		</section>
+	{/if}
 
 	<section class="card section">
 		<h2>Akun Saya</h2>
@@ -233,6 +265,33 @@
 		color: var(--text-muted);
 		font-size: 0.88rem;
 		margin-top: 0;
+	}
+
+	.toko-form {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.toko-form label {
+		font-size: 0.85rem;
+		color: var(--text-muted);
+		margin: 0.6rem 0 0.3rem 0;
+	}
+
+	.toko-form label:first-of-type {
+		margin-top: 0;
+	}
+
+	.toko-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.8rem;
+		margin-top: 1rem;
+	}
+
+	.saved-hint {
+		font-size: 0.85rem;
+		color: var(--accent);
 	}
 
 	dialog {
