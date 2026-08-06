@@ -14,6 +14,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0002_kasbon.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "barang_delete_set_null",
+            sql: include_str!("../migrations/0003_barang_delete_set_null.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

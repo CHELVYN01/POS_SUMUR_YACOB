@@ -144,7 +144,16 @@
 
 	async function hapus(id: number) {
 		const target = barangList.find((b) => b.id === id);
-		await hapusBarang(id);
+		if (target && !confirm(`Hapus barang "${target.nama}"?`)) return;
+
+		try {
+			await hapusBarang(id);
+		} catch (err) {
+			formError = 'Gagal menghapus barang. Coba lagi.';
+			console.error(err);
+			return;
+		}
+
 		barangList = await listBarang();
 		if (target) catatLog(`Hapus barang ${target.nama}`);
 		if (editId === id) resetForm();
