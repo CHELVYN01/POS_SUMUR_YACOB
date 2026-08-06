@@ -29,7 +29,7 @@
 		},
 		{
 			href: '/laporan',
-			label: 'List Penjualan',
+			label: 'Laporan',
 			icon: 'M6 3.5h9l3 3V20.5H6V3.5Z M9 9.5h6 M9 13h6 M9 16.5h4'
 		},
 		{
