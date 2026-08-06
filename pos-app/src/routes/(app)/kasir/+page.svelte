@@ -14,8 +14,12 @@
 	let daftarBarang = $state<Barang[]>([]);
 	let membayar = $state(false);
 	let showInvoice = $state(false);
+	let sudahBayar = $state(false);
+	let uangDibayar = $state('');
+	let ringkasanBayar = $state<{ total: number; kembalian: number } | null>(null);
 	let log = $state<LogEntry[]>([]);
 	let scanInput = $state<HTMLInputElement | null>(null);
+	let uangInput = $state<HTMLInputElement | null>(null);
 
 	function catatLog(pesan: string) {
 		const waktu = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -47,6 +51,9 @@
 	);
 
 	let total = $derived(cart.reduce((sum, item) => sum + item.harga * item.jumlah, 0));
+	let uangDibayarNum = $derived(Number(uangDibayar) || 0);
+	let kembalian = $derived(uangDibayarNum - total);
+	let bayarValid = $derived(uangDibayarNum >= total);
 
 	function tambah(barang: Barang) {
 		const existing = cart.find((c) => c.barangId === barang.id);
@@ -108,17 +115,41 @@
 		scan = '';
 	}
 
+	function bukaInvoice() {
+		uangDibayar = '';
+		sudahBayar = false;
+		ringkasanBayar = null;
+		showInvoice = true;
+		setTimeout(() => uangInput?.focus(), 50);
+	}
+
+	function tutupInvoice() {
+		showInvoice = false;
+		sudahBayar = false;
+		uangDibayar = '';
+		ringkasanBayar = null;
+	}
+
+	function uangPas() {
+		uangDibayar = String(total);
+		uangInput?.focus();
+	}
+
 	async function bayar() {
-		if (cart.length === 0 || !$currentUser) return;
+		if (cart.length === 0 || !$currentUser || !bayarValid) return;
 		membayar = true;
 		try {
 			const totalBayar = total;
+			const kembalianAkhir = kembalian;
 			await simpanPenjualan($currentUser.id, cart);
-			catatLog(`Bayar — total ${formatRupiah(totalBayar)}`);
+			catatLog(
+				`Bayar — total ${formatRupiah(totalBayar)}, kembalian ${formatRupiah(kembalianAkhir)}`
+			);
 			cart = [];
+			ringkasanBayar = { total: totalBayar, kembalian: kembalianAkhir };
+			sudahBayar = true;
 		} finally {
 			membayar = false;
-			showInvoice = false;
 		}
 	}
 </script>
@@ -179,11 +210,7 @@
 
 			<div class="cart-actions">
 				<button onclick={bersihkan} disabled={membayar}>Kosongkan</button>
-				<button
-					class="primary"
-					onclick={() => (showInvoice = true)}
-					disabled={membayar || cart.length === 0}
-				>
+				<button class="primary" onclick={bukaInvoice} disabled={membayar || cart.length === 0}>
 					Bayar
 				</button>
 			</div>
@@ -244,32 +271,75 @@
 	<div
 		class="invoice-overlay"
 		role="presentation"
-		onclick={() => !membayar && (showInvoice = false)}
-		onkeydown={(e) => e.key === 'Escape' && !membayar && (showInvoice = false)}
+		onclick={() => !membayar && !sudahBayar && tutupInvoice()}
+		onkeydown={(e) => e.key === 'Escape' && !membayar && !sudahBayar && tutupInvoice()}
 	>
 		<div class="invoice-card card" onclick={(e) => e.stopPropagation()}>
 			<h2>Invoice</h2>
 
-			<div class="invoice-items">
-				{#each cart as item (item.barangId)}
-					<div class="invoice-row">
-						<span class="invoice-nama">{item.nama} <span class="invoice-jml">x{item.jumlah}</span></span>
-						<span>{formatRupiah(item.harga * item.jumlah)}</span>
+			{#if !sudahBayar}
+				<div class="invoice-items">
+					{#each cart as item (item.barangId)}
+						<div class="invoice-row">
+							<span class="invoice-nama"
+								>{item.nama} <span class="invoice-jml">x{item.jumlah}</span></span
+							>
+							<span>{formatRupiah(item.harga * item.jumlah)}</span>
+						</div>
+					{/each}
+				</div>
+
+				<div class="invoice-total">
+					<span>Total</span>
+					<span>{formatRupiah(total)}</span>
+				</div>
+
+				<div class="bayar-input-row">
+					<label for="uang-dibayar">Uang Dibayar</label>
+					<div class="uang-input-wrap">
+						<input
+							id="uang-dibayar"
+							type="number"
+							min="0"
+							step="500"
+							bind:value={uangDibayar}
+							bind:this={uangInput}
+							placeholder="0"
+							disabled={membayar}
+						/>
+						<button type="button" onclick={uangPas} disabled={membayar}>Uang Pas</button>
 					</div>
-				{/each}
-			</div>
+				</div>
 
-			<div class="invoice-total">
-				<span>Total</span>
-				<span>{formatRupiah(total)}</span>
-			</div>
+				<div class="invoice-total kembalian" class:kurang={!bayarValid && uangDibayarNum > 0}>
+					<span>Kembalian</span>
+					<span>{formatRupiah(Math.max(kembalian, 0))}</span>
+				</div>
+				{#if uangDibayarNum > 0 && !bayarValid}
+					<p class="kurang-msg">Uang belum cukup — kurang {formatRupiah(total - uangDibayarNum)}</p>
+				{/if}
 
-			<div class="invoice-actions">
-				<button onclick={() => (showInvoice = false)} disabled={membayar}>Batal</button>
-				<button class="primary" onclick={bayar} disabled={membayar}>
-					{membayar ? 'Menyimpan...' : 'Konfirmasi Bayar'}
-				</button>
-			</div>
+				<div class="invoice-actions">
+					<button onclick={tutupInvoice} disabled={membayar}>Batal</button>
+					<button class="primary" onclick={bayar} disabled={membayar || !bayarValid}>
+						{membayar ? 'Menyimpan...' : 'Konfirmasi Bayar'}
+					</button>
+				</div>
+			{:else if ringkasanBayar}
+				<div class="invoice-total">
+					<span>Total</span>
+					<span>{formatRupiah(ringkasanBayar.total)}</span>
+				</div>
+
+				<div class="invoice-total kembalian">
+					<span>Kembalian</span>
+					<span>{formatRupiah(ringkasanBayar.kembalian)}</span>
+				</div>
+
+				<div class="invoice-actions">
+					<button class="primary" onclick={tutupInvoice}>Selesai</button>
+				</div>
+			{/if}
 		</div>
 	</div>
 {/if}
@@ -476,6 +546,51 @@
 		font-weight: 600;
 		font-size: 1.2rem;
 		padding: 0.9rem 0;
+	}
+
+	.invoice-total.kembalian {
+		border-top: 1px solid var(--border);
+		color: var(--accent, #2f8a4e);
+	}
+
+	.invoice-total.kembalian.kurang {
+		color: var(--danger, #c0392b);
+	}
+
+	.bayar-input-row {
+		padding-top: 0.9rem;
+		border-top: 1px solid var(--border);
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+
+	.bayar-input-row label {
+		font-size: 0.85rem;
+		color: var(--text-muted);
+	}
+
+	.uang-input-wrap {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.uang-input-wrap input {
+		flex: 1;
+		font-size: 1.1rem;
+		padding: 0.6em 0.8em;
+	}
+
+	.uang-input-wrap button {
+		flex-shrink: 0;
+		padding: 0 0.9em;
+		font-size: 0.85rem;
+	}
+
+	.kurang-msg {
+		color: var(--danger, #c0392b);
+		font-size: 0.82rem;
+		margin: -0.4rem 0 0.4rem 0;
 	}
 
 	.invoice-actions {
