@@ -53,7 +53,7 @@
 </script>
 
 <div class="login-page">
-	<div class="login-panel" style="background-image: url('/img/login-panel.png')"></div>
+	<div class="login-panel" style="background-image: url('/img/login-frame.svg')"></div>
 
 	<div class="login-right">
 	<form class="card login-box" onsubmit={login} autocomplete="off">
