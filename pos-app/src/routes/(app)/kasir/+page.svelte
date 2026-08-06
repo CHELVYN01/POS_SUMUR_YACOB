@@ -3,6 +3,7 @@
 	import { listBarang, cariBarangByBarcode } from '$lib/db/barang';
 	import { simpanPenjualan } from '$lib/db/penjualan';
 	import { currentUser } from '$lib/stores/session';
+	import { tandaiScan } from '$lib/stores/scanStatus';
 	import type { Barang, ItemPenjualan } from '$lib/types';
 
 	type LogEntry = { waktu: string; pesan: string };
@@ -12,6 +13,7 @@
 	let cart = $state<ItemPenjualan[]>([]);
 	let daftarBarang = $state<Barang[]>([]);
 	let membayar = $state(false);
+	let showInvoice = $state(false);
 	let log = $state<LogEntry[]>([]);
 
 	function catatLog(pesan: string) {
@@ -82,7 +84,10 @@
 		if (!barang) {
 			barang = daftarBarang.find((b) => b.nama.toLowerCase() === kode.toLowerCase()) ?? null;
 		}
-		if (barang) tambah(barang);
+		if (barang) {
+			tambah(barang);
+			tandaiScan();
+		}
 		scan = '';
 	}
 
@@ -96,6 +101,7 @@
 			cart = [];
 		} finally {
 			membayar = false;
+			showInvoice = false;
 		}
 	}
 </script>
@@ -155,8 +161,12 @@
 
 			<div class="cart-actions">
 				<button onclick={bersihkan} disabled={membayar}>Kosongkan</button>
-				<button class="primary" onclick={bayar} disabled={membayar || cart.length === 0}>
-					{membayar ? 'Menyimpan...' : 'Bayar'}
+				<button
+					class="primary"
+					onclick={() => (showInvoice = true)}
+					disabled={membayar || cart.length === 0}
+				>
+					Bayar
 				</button>
 			</div>
 		</div>
@@ -211,6 +221,40 @@
 		</section>
 	</div>
 </div>
+
+{#if showInvoice}
+	<div
+		class="invoice-overlay"
+		role="presentation"
+		onclick={() => !membayar && (showInvoice = false)}
+		onkeydown={(e) => e.key === 'Escape' && !membayar && (showInvoice = false)}
+	>
+		<div class="invoice-card card" onclick={(e) => e.stopPropagation()}>
+			<h2>Invoice</h2>
+
+			<div class="invoice-items">
+				{#each cart as item (item.barangId)}
+					<div class="invoice-row">
+						<span class="invoice-nama">{item.nama} <span class="invoice-jml">x{item.jumlah}</span></span>
+						<span>{formatRupiah(item.harga * item.jumlah)}</span>
+					</div>
+				{/each}
+			</div>
+
+			<div class="invoice-total">
+				<span>Total</span>
+				<span>{formatRupiah(total)}</span>
+			</div>
+
+			<div class="invoice-actions">
+				<button onclick={() => (showInvoice = false)} disabled={membayar}>Batal</button>
+				<button class="primary" onclick={bayar} disabled={membayar}>
+					{membayar ? 'Menyimpan...' : 'Konfirmasi Bayar'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.kasir {
@@ -360,5 +404,70 @@
 
 	.log-msg {
 		color: var(--text);
+	}
+
+	.invoice-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.45);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 100;
+	}
+
+	.invoice-card {
+		width: 100%;
+		max-width: 380px;
+		padding: 1.5rem;
+	}
+
+	.invoice-card h2 {
+		margin: 0 0 1rem 0;
+		font-size: 1.1rem;
+	}
+
+	.invoice-items {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		max-height: 40vh;
+		overflow-y: auto;
+		padding-bottom: 0.9rem;
+		border-bottom: 1px solid var(--border);
+	}
+
+	.invoice-row {
+		display: flex;
+		justify-content: space-between;
+		font-size: 0.9rem;
+		gap: 1rem;
+	}
+
+	.invoice-nama {
+		color: var(--text);
+	}
+
+	.invoice-jml {
+		color: var(--text-muted);
+	}
+
+	.invoice-total {
+		display: flex;
+		justify-content: space-between;
+		font-weight: 600;
+		font-size: 1.2rem;
+		padding: 0.9rem 0;
+	}
+
+	.invoice-actions {
+		display: flex;
+		gap: 0.6rem;
+	}
+
+	.invoice-actions button {
+		flex: 1;
+		padding: 0.75em 1em;
+		font-size: 1rem;
 	}
 </style>

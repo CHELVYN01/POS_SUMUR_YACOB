@@ -3,15 +3,30 @@
 	import { goto } from '$app/navigation';
 	import { currentUser } from '$lib/stores/session';
 	import { theme, toggleTheme } from '$lib/stores/theme';
+	import { scanAktif } from '$lib/stores/scanStatus';
 
 	let { children } = $props();
 
 	const menu = [
-		{ href: '/kasir', label: 'Jual Barang' },
-		{ href: '/produk', label: 'Input Barang' },
-		{ href: '/laporan', label: 'List Penjualan' },
-		{ href: '/pengaturan', label: 'Pengaturan' }
+		{
+			href: '/kasir',
+			label: 'Jual Barang',
+			icon: 'M3 4h2l1.4 10.6A2 2 0 0 0 8.4 16.6h8.2a2 2 0 0 0 2-1.6L20 8H6.2 M9 20.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z M16.5 20.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z'
+		},
+		{
+			href: '/produk',
+			label: 'Input Barang',
+			icon: 'M3.5 7.5 12 3l8.5 4.5-8.5 4.5-8.5-4.5Z M3.5 7.5V16.5L12 21l8.5-4.5V7.5 M12 12v9'
+		},
+		{
+			href: '/laporan',
+			label: 'List Penjualan',
+			icon: 'M6 3.5h9l3 3V20.5H6V3.5Z M9 9.5h6 M9 13h6 M9 16.5h4'
+		}
 	];
+
+	const pengaturanIcon =
+		'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19.5a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H4.5a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 6.1 8.6a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H10.5a1.65 1.65 0 0 0 1-1.51V4.5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V10.5a1.65 1.65 0 0 0 1.51 1H19.5a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z';
 
 	let judulHalaman = $derived(menu.find((m) => m.href === page.url.pathname)?.label ?? '');
 
@@ -31,12 +46,22 @@
 		<nav>
 			{#each menu as item (item.href)}
 				<a href={item.href} class:active={page.url.pathname === item.href}>
+					<svg class="nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+						<path d={item.icon} />
+					</svg>
 					{item.label}
 				</a>
 			{/each}
 		</nav>
 
 		<div class="sidebar-footer">
+			<a href="/pengaturan" class="settings-link" class:active={page.url.pathname === '/pengaturan'}>
+				<svg class="nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+					<path d={pengaturanIcon} />
+				</svg>
+				Pengaturan
+			</a>
+
 			{#if $currentUser}
 				<div class="user">
 					<div class="user-name">{$currentUser.nama}</div>
@@ -52,6 +77,11 @@
 			<h2 class="page-title">{judulHalaman}</h2>
 
 			<div class="navbar-actions">
+				<div class="scan-indicator" title="Status scanner barcode">
+					<span class="scan-dot" class:active={$scanAktif}></span>
+					{$scanAktif ? 'Scan Aktif' : 'Scan Idle'}
+				</div>
+
 				<button class="icon-btn" onclick={toggleTheme} title="Ganti tema" aria-label="Ganti tema">
 					{#if $theme === 'light'}
 						<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -120,11 +150,18 @@
 	}
 
 	nav a {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
 		text-decoration: none;
 		color: var(--text);
 		padding: 0.6em 0.75em;
 		border-radius: var(--radius);
 		font-size: 0.9rem;
+	}
+
+	.nav-icon {
+		flex-shrink: 0;
 	}
 
 	nav a:hover {
@@ -137,11 +174,33 @@
 	}
 
 	.sidebar-footer {
-		border-top: 1px solid var(--border);
-		padding-top: 0.9rem;
 		display: flex;
 		flex-direction: column;
 		gap: 0.6rem;
+	}
+
+	.settings-link {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.6rem;
+		text-decoration: none;
+		color: var(--text);
+		padding: 0.6em 0.75em;
+		border-radius: var(--radius);
+		font-size: 0.9rem;
+		border-top: 1px solid var(--border);
+		margin-top: 0.6rem;
+		padding-top: calc(0.6em + 0.6rem);
+	}
+
+	.settings-link:hover {
+		background: var(--bg);
+	}
+
+	.settings-link.active {
+		background: var(--accent);
+		color: #fff;
 	}
 
 	.user {
@@ -187,6 +246,26 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
+	}
+
+	.scan-indicator {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.8rem;
+		color: var(--text-muted);
+	}
+
+	.scan-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--text-muted);
+		transition: background 0.2s ease;
+	}
+
+	.scan-dot.active {
+		background: #22c55e;
 	}
 
 	.icon-btn {
