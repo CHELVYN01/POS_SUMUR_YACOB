@@ -5,11 +5,19 @@
 	import { currentUser } from '$lib/stores/session';
 	import type { Barang, ItemPenjualan } from '$lib/types';
 
+	type LogEntry = { waktu: string; pesan: string };
+
 	let cari = $state('');
 	let scan = $state('');
 	let cart = $state<ItemPenjualan[]>([]);
 	let daftarBarang = $state<Barang[]>([]);
 	let membayar = $state(false);
+	let log = $state<LogEntry[]>([]);
+
+	function catatLog(pesan: string) {
+		const waktu = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+		log = [{ waktu, pesan }, ...log].slice(0, 50);
+	}
 
 	onMount(async () => {
 		daftarBarang = await listBarang();
@@ -28,11 +36,15 @@
 		} else {
 			cart.push({ barangId: barang.id, nama: barang.nama, harga: barang.harga, jumlah: 1 });
 		}
+		catatLog(`Tambah ${barang.nama} x1`);
 	}
 
 	function tambahJumlah(barangId: number) {
 		const existing = cart.find((c) => c.barangId === barangId);
-		if (existing) existing.jumlah += 1;
+		if (existing) {
+			existing.jumlah += 1;
+			catatLog(`Tambah ${existing.nama} x1`);
+		}
 	}
 
 	function kurangi(barangId: number) {
@@ -42,14 +54,19 @@
 		if (existing.jumlah <= 0) {
 			cart = cart.filter((c) => c.barangId !== barangId);
 		}
+		catatLog(`Kurangi ${existing.nama} x1`);
 	}
 
 	function hapus(barangId: number) {
+		const existing = cart.find((c) => c.barangId === barangId);
 		cart = cart.filter((c) => c.barangId !== barangId);
+		if (existing) catatLog(`Hapus ${existing.nama} dari keranjang`);
 	}
 
 	function bersihkan() {
+		if (cart.length === 0) return;
 		cart = [];
+		catatLog('Kosongkan keranjang');
 	}
 
 	function formatRupiah(n: number) {
@@ -73,7 +90,9 @@
 		if (cart.length === 0 || !$currentUser) return;
 		membayar = true;
 		try {
+			const totalBayar = total;
 			await simpanPenjualan($currentUser.id, cart);
+			catatLog(`Bayar — total ${formatRupiah(totalBayar)}`);
 			cart = [];
 		} finally {
 			membayar = false;
@@ -143,34 +162,54 @@
 		</div>
 	</section>
 
-	<section class="panel list-panel">
-		<h1>Jual Barang</h1>
-		<input class="search" placeholder="Cari barang..." bind:value={cari} />
+	<div class="side-col">
+		<section class="panel list-panel card">
+			<h1>Jual Barang</h1>
+			<input class="search" placeholder="Cari barang..." bind:value={cari} />
 
-		<table>
-			<thead>
-				<tr>
-					<th>Nama Barang</th>
-					<th>Harga</th>
-					<th></th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each barangFiltered as barang (barang.id)}
-					<tr>
-						<td>{barang.nama}</td>
-						<td>{formatRupiah(barang.harga)}</td>
-						<td class="action">
-							<button onclick={() => tambah(barang)}>+</button>
-						</td>
-					</tr>
-				{/each}
-				{#if barangFiltered.length === 0}
-					<tr><td colspan="3" class="empty">Barang tidak ditemukan</td></tr>
+			<div class="list-table-wrap">
+				<table>
+					<thead>
+						<tr>
+							<th>Nama Barang</th>
+							<th>Harga</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each barangFiltered as barang (barang.id)}
+							<tr>
+								<td>{barang.nama}</td>
+								<td>{formatRupiah(barang.harga)}</td>
+								<td class="action">
+									<button onclick={() => tambah(barang)}>+</button>
+								</td>
+							</tr>
+						{/each}
+						{#if barangFiltered.length === 0}
+							<tr><td colspan="3" class="empty">Barang tidak ditemukan</td></tr>
+						{/if}
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		<section class="panel log-panel card">
+			<h2>Log Aktivitas</h2>
+			<div class="log-list">
+				{#if log.length === 0}
+					<p class="empty">Belum ada aktivitas</p>
+				{:else}
+					{#each log as entry, i (i)}
+						<div class="log-entry">
+							<span class="log-time">{entry.waktu}</span>
+							<span class="log-msg">{entry.pesan}</span>
+						</div>
+					{/each}
 				{/if}
-			</tbody>
-		</table>
-	</section>
+			</div>
+		</section>
+	</div>
 </div>
 
 <style>
@@ -180,6 +219,13 @@
 		gap: 1.5rem;
 		align-items: start;
 		height: calc(100vh - 56px - 4rem);
+	}
+
+	.side-col {
+		display: flex;
+		flex-direction: column;
+		gap: 1.5rem;
+		height: 100%;
 	}
 
 	.cart {
@@ -250,6 +296,14 @@
 		font-size: 1rem;
 	}
 
+	.list-panel {
+		padding: 1.25rem;
+		flex: 3;
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+	}
+
 	.list-panel h1 {
 		font-size: 1.1rem;
 	}
@@ -257,5 +311,53 @@
 	.search {
 		width: 100%;
 		margin-bottom: 1rem;
+	}
+
+	.list-table-wrap {
+		flex: 1;
+		overflow-y: auto;
+	}
+
+	.log-panel {
+		padding: 1.25rem;
+		flex: 2;
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+	}
+
+	.log-panel h2 {
+		font-size: 0.95rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.log-list {
+		flex: 1;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.log-entry {
+		display: flex;
+		gap: 0.6rem;
+		font-size: 0.82rem;
+		padding-bottom: 0.5rem;
+		border-bottom: 1px solid var(--border);
+	}
+
+	.log-entry:last-child {
+		border-bottom: none;
+	}
+
+	.log-time {
+		color: var(--text-muted);
+		flex-shrink: 0;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.log-msg {
+		color: var(--text);
 	}
 </style>
