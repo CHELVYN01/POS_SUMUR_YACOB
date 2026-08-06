@@ -12,10 +12,25 @@
   "app": {
     "windows": [
       {
+        "label": "splash",
+        "url": "/splash",
+        "width": 640,
+        "height": 363,
+        "transparent": true,
+        "decorations": false,
+        "resizable": false,
+        "center": true,
+        "alwaysOnTop": true,
+        "shadow": false
+      },
+      {
+        "label": "main",
+        "url": "/",
         "title": "Kios Sumur Yacob",
         "width": 1280,
         "height": 800,
-        "fullscreen": true
+        "fullscreen": true,
+        "visible": false
       }
     ],
     "security": {

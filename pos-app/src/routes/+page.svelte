@@ -53,8 +53,10 @@
 </script>
 
 <div class="login-page">
+	<div class="login-panel" style="background-image: url('/img/login-panel.png')"></div>
+
+	<div class="login-right">
 	<form class="card login-box" onsubmit={login} autocomplete="off">
-		<img class="logo" src="/img/logo-login.png" alt="Kios Sumur Yacob" />
 		<p class="subtitle">Masuk untuk mulai transaksi</p>
 
 		<label for="username">Username</label>
@@ -109,16 +111,31 @@
 
 		<button type="submit" class="primary" disabled={loading}>{loading ? 'Memeriksa...' : 'Masuk'}</button>
 	</form>
+	</div>
 </div>
 
 <style>
 	.login-page {
 		min-height: 100vh;
 		display: flex;
+	}
+
+	.login-panel {
+		flex: 1;
+		min-width: 0;
+		background-size: cover;
+		background-position: center;
+		background-repeat: no-repeat;
+	}
+
+	.login-right {
+		flex: 1;
+		min-width: 0;
+		display: flex;
 		align-items: center;
 		justify-content: center;
 		padding: 1.5rem;
-		background: linear-gradient(180deg, #eaf7f0 0%, #ffffff 60%);
+		background: #ffffff;
 	}
 
 	.login-box {
@@ -129,12 +146,6 @@
 		flex-direction: column;
 		gap: 0.4rem;
 		background: linear-gradient(160deg, #b9e8cd 0%, #eefaf3 45%, #ffffff 85%);
-	}
-
-	.logo {
-		display: block;
-		width: 140px;
-		margin: 0 auto 0.8rem auto;
 	}
 
 	.subtitle {
