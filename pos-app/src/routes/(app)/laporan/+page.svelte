@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { listPenjualan } from '$lib/db/penjualan';
 	import { listKasBon } from '$lib/db/kasbon';
+	import { exportLaporanExcel } from '$lib/export/excel';
 	import type { Penjualan, KasBon } from '$lib/types';
 
 	let tab = $state<'penjualan' | 'bon'>('penjualan');
@@ -10,6 +11,8 @@
 	let daftarKasBon = $state<KasBon[]>([]);
 	let loading = $state(true);
 	let expanded = $state<number | null>(null);
+	let mengekspor = $state(false);
+	let exportError = $state('');
 
 	onMount(async () => {
 		[daftarPenjualan, daftarKasBon] = await Promise.all([listPenjualan(), listKasBon()]);
@@ -38,13 +41,31 @@
 	function toggle(id: number) {
 		expanded = expanded === id ? null : id;
 	}
+
+	async function eksporExcel() {
+		exportError = '';
+		mengekspor = true;
+		try {
+			await exportLaporanExcel(daftarPenjualan, daftarKasBon);
+		} catch (e) {
+			exportError = 'Gagal mengekspor: ' + (e instanceof Error ? e.message : String(e));
+		} finally {
+			mengekspor = false;
+		}
+	}
 </script>
 
 <div class="laporan">
 	<div class="header">
 		<h1>Laporan</h1>
-		<button disabled title="Belum tersambung ke data asli">Export Excel</button>
+		<button onclick={eksporExcel} disabled={mengekspor || loading}>
+			{mengekspor ? 'Mengekspor...' : 'Export Excel'}
+		</button>
 	</div>
+
+	{#if exportError}
+		<p class="error">{exportError}</p>
+	{/if}
 
 	<div class="tabs">
 		<button class="tab-btn" class:active={tab === 'penjualan'} onclick={() => (tab = 'penjualan')}>
@@ -222,6 +243,12 @@
 		color: var(--accent);
 		border-bottom-color: var(--accent);
 		font-weight: 600;
+	}
+
+	.error {
+		color: var(--danger);
+		font-size: 0.85rem;
+		margin: -0.6rem 0 1rem 0;
 	}
 
 	.summary {
