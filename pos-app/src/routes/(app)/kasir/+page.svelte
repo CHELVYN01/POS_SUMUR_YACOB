@@ -4,13 +4,13 @@
 	import { simpanPenjualan } from '$lib/db/penjualan';
 	import { currentUser } from '$lib/stores/session';
 	import { tandaiScan } from '$lib/stores/scanStatus';
-	import type { Barang, ItemPenjualan } from '$lib/types';
+	import { keranjangState, nextKeranjangIdAndIncrement } from '$lib/stores/keranjang.svelte';
+	import type { Barang } from '$lib/types';
 
 	type LogEntry = { waktu: string; pesan: string };
 
 	let cari = $state('');
 	let scan = $state('');
-	let cart = $state<ItemPenjualan[]>([]);
 	let daftarBarang = $state<Barang[]>([]);
 	let membayar = $state(false);
 	let showInvoice = $state(false);
@@ -51,6 +51,9 @@
 		daftarBarang.filter((b) => b.nama.toLowerCase().includes(cari.trim().toLowerCase()))
 	);
 
+	let activeKeranjang = $derived(keranjangState.list.find((k) => k.id === keranjangState.activeId)!);
+	let cart = $derived(activeKeranjang.cart);
+
 	let total = $derived(cart.reduce((sum, item) => sum + item.harga * item.jumlah, 0));
 	let uangDibayarNum = $derived(Number(uangDibayar) || 0);
 	let kembalian = $derived(uangDibayarNum - total);
@@ -60,43 +63,72 @@
 	);
 
 	function tambah(barang: Barang) {
-		const existing = cart.find((c) => c.barangId === barang.id);
+		const existing = activeKeranjang.cart.find((c) => c.barangId === barang.id);
 		if (existing) {
 			existing.jumlah += 1;
 		} else {
-			cart.push({ barangId: barang.id, nama: barang.nama, harga: barang.harga, jumlah: 1 });
+			activeKeranjang.cart.push({
+				barangId: barang.id,
+				nama: barang.nama,
+				harga: barang.harga,
+				jumlah: 1
+			});
 		}
-		catatLog(`Tambah ${barang.nama} x1`);
+		catatLog(`[${activeKeranjang.nama}] Tambah ${barang.nama} x1`);
 	}
 
 	function tambahJumlah(barangId: number) {
-		const existing = cart.find((c) => c.barangId === barangId);
+		const existing = activeKeranjang.cart.find((c) => c.barangId === barangId);
 		if (existing) {
 			existing.jumlah += 1;
-			catatLog(`Tambah ${existing.nama} x1`);
+			catatLog(`[${activeKeranjang.nama}] Tambah ${existing.nama} x1`);
 		}
 	}
 
 	function kurangi(barangId: number) {
-		const existing = cart.find((c) => c.barangId === barangId);
+		const existing = activeKeranjang.cart.find((c) => c.barangId === barangId);
 		if (!existing) return;
 		existing.jumlah -= 1;
 		if (existing.jumlah <= 0) {
-			cart = cart.filter((c) => c.barangId !== barangId);
+			activeKeranjang.cart = activeKeranjang.cart.filter((c) => c.barangId !== barangId);
 		}
-		catatLog(`Kurangi ${existing.nama} x1`);
+		catatLog(`[${activeKeranjang.nama}] Kurangi ${existing.nama} x1`);
 	}
 
 	function hapus(barangId: number) {
-		const existing = cart.find((c) => c.barangId === barangId);
-		cart = cart.filter((c) => c.barangId !== barangId);
-		if (existing) catatLog(`Hapus ${existing.nama} dari keranjang`);
+		const existing = activeKeranjang.cart.find((c) => c.barangId === barangId);
+		activeKeranjang.cart = activeKeranjang.cart.filter((c) => c.barangId !== barangId);
+		if (existing) catatLog(`[${activeKeranjang.nama}] Hapus ${existing.nama} dari keranjang`);
 	}
 
 	function bersihkan() {
-		if (cart.length === 0) return;
-		cart = [];
-		catatLog('Kosongkan keranjang');
+		if (activeKeranjang.cart.length === 0) return;
+		activeKeranjang.cart = [];
+		catatLog(`[${activeKeranjang.nama}] Kosongkan keranjang`);
+	}
+
+	function bukaKeranjangBaru() {
+		if (keranjangState.list.length >= 5 || showInvoice) return;
+		const id = nextKeranjangIdAndIncrement();
+		keranjangState.list.push({ id, nama: `Keranjang ${id}`, cart: [] });
+		keranjangState.activeId = id;
+	}
+
+	function tutupKeranjang(id: number) {
+		if (showInvoice) return;
+		keranjangState.list = keranjangState.list.filter((k) => k.id !== id);
+		if (keranjangState.list.length === 0) {
+			const newId = nextKeranjangIdAndIncrement();
+			keranjangState.list.push({ id: newId, nama: `Keranjang ${newId}`, cart: [] });
+			keranjangState.activeId = newId;
+		} else if (keranjangState.activeId === id) {
+			keranjangState.activeId = keranjangState.list[0].id;
+		}
+	}
+
+	function pindahKeranjang(id: number) {
+		if (showInvoice) return;
+		keranjangState.activeId = id;
 	}
 
 	function formatRupiah(n: number) {
@@ -128,10 +160,12 @@
 	}
 
 	function tutupInvoice() {
+		const idSelesaiBayar = sudahBayar ? keranjangState.activeId : null;
 		showInvoice = false;
 		sudahBayar = false;
 		uangDibayar = '';
 		ringkasanBayar = null;
+		if (idSelesaiBayar !== null) tutupKeranjang(idSelesaiBayar);
 	}
 
 	function uangPas() {
@@ -158,13 +192,14 @@
 		try {
 			const totalBayar = total;
 			const kembalianAkhir = kembalian;
+			const namaKeranjang = activeKeranjang.nama;
 			await simpanPenjualan($currentUser.id, cart);
 			await kurangiStokBarang(cart.map((item) => ({ barangId: item.barangId, jumlah: item.jumlah })));
 			daftarBarang = await listBarang();
 			catatLog(
-				`Bayar — total ${formatRupiah(totalBayar)}, kembalian ${formatRupiah(kembalianAkhir)}`
+				`[${namaKeranjang}] Bayar — total ${formatRupiah(totalBayar)}, kembalian ${formatRupiah(kembalianAkhir)}`
 			);
-			cart = [];
+			activeKeranjang.cart = [];
 			ringkasanBayar = { total: totalBayar, kembalian: kembalianAkhir };
 			sudahBayar = true;
 		} finally {
@@ -175,6 +210,39 @@
 
 <div class="kasir">
 	<section class="panel cart card">
+		<div class="tab-row">
+			{#each keranjangState.list as k (k.id)}
+				<div class="tab" class:active={k.id === keranjangState.activeId}>
+					<button
+						type="button"
+						class="tab-label"
+						disabled={showInvoice}
+						onclick={() => pindahKeranjang(k.id)}
+					>
+						{k.nama}
+					</button>
+					{#if keranjangState.list.length > 1}
+						<button
+							type="button"
+							class="tab-close"
+							disabled={showInvoice}
+							onclick={() => tutupKeranjang(k.id)}
+						>
+							×
+						</button>
+					{/if}
+				</div>
+			{/each}
+			<button
+				type="button"
+				class="tab tab-add"
+				disabled={keranjangState.list.length >= 5 || showInvoice}
+				onclick={bukaKeranjangBaru}
+			>
+				+
+			</button>
+		</div>
+
 		<form class="scan-row" onsubmit={submitScan}>
 			<input
 				class="scan-input"
@@ -400,6 +468,62 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+	}
+
+	.tab-row {
+		display: flex;
+		gap: 0.4rem;
+		margin-bottom: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.tab {
+		display: flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.2em 0.3em 0.2em 0.2em;
+		font-size: 0.85rem;
+		border-radius: 8px;
+		border: 1px solid var(--border);
+		background: transparent;
+		color: var(--text-muted);
+	}
+
+	.tab.active {
+		background: var(--accent, #2f8a4e);
+		border-color: var(--accent, #2f8a4e);
+		color: #fff;
+	}
+
+	.tab-label {
+		padding: 0.3em 0.5em;
+		background: transparent;
+		border: none;
+		color: inherit;
+		font-size: inherit;
+	}
+
+	.tab-add {
+		font-weight: 600;
+		padding: 0.4em 0.9em;
+	}
+
+	.tab-close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.1em;
+		height: 1.1em;
+		border-radius: 50%;
+		font-size: 0.9em;
+		line-height: 1;
+		border: none;
+		background: transparent;
+		color: inherit;
+	}
+
+	.tab-close:hover {
+		background: rgba(0, 0, 0, 0.15);
 	}
 
 	.scan-row {

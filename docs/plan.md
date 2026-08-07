@@ -172,6 +172,8 @@ In plan mode, you should:
 
 Remember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase.
 
+plan fase 16 ✅
+- di penjualan keranjang ini busa lebih dari satu gak, client ada request klo ada dua pembeli dan terkadang kita melayani ke dua nya terus misal 1 beli gula dan masih di ambil oleh pelayan 1 makan si kasih lanjut orang kedua dia beli permen karen dan mau bayar maka kasih nya langsung buat kerenjang untuk pembeli ke dua dan bayar tanpa keranjang pertama terhapus gitu bisa gak yah 
 
 
 ## plan fix 
@@ -187,6 +189,10 @@ pembeli, jadi nanti uang pembeli di kurangi total brang beli dan hasil nya dapat
 plan fix 3 ✅
 - tomobol hapus di input barang tidak berfungsi ada error 
 +page.svelte:151 Uncaught (in promise) error returned from database: (code: 787) FOREIGN KEY constraint failed
+
+plan fix 4 ✅
+- pak saya ingin multi kerang ini akan ke hapus pada saat dia di bayar selesai klo misalnya kita di penjualan, terus tiba tiba kita ke product lalu kembali ke penjalan datanya tidak tersimpan nih termasuk keranjan kembali 1 nah ini jadi probleh dong
+
 
 
 
