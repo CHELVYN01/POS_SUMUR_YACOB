@@ -6,6 +6,8 @@
 	import { theme, toggleTheme } from '$lib/stores/theme';
 	import { scanAktif } from '$lib/stores/scanStatus';
 	import { tokoInfo } from '$lib/stores/toko';
+	import { getDb } from '$lib/db';
+	import { runAutoBackupIfDue } from '$lib/db-manager';
 
 	let { children } = $props();
 
@@ -13,6 +15,17 @@
 		const unsubscribe = currentUser.subscribe((user) => {
 			if (!user) goto('/');
 		});
+
+		(async () => {
+			try {
+				const db = await getDb();
+				await db.execute('PRAGMA wal_checkpoint(TRUNCATE);');
+				await runAutoBackupIfDue();
+			} catch (e) {
+				console.error('Auto-backup gagal:', e);
+			}
+		})();
+
 		return unsubscribe;
 	});
 

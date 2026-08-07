@@ -35,3 +35,15 @@ export function resetDatabase(admin: {
 export function relaunchApp(): Promise<void> {
 	return invoke('relaunch_app');
 }
+
+export function runAutoBackupIfDue(): Promise<boolean> {
+	return invoke('run_auto_backup_if_due');
+}
+
+export function getAutoBackupDir(): Promise<string> {
+	return invoke('get_auto_backup_dir');
+}
+
+export function setAutoBackupDir(dir: string): Promise<void> {
+	return invoke('set_auto_backup_dir', { dir });
+}

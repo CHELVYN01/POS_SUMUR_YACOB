@@ -48,6 +48,9 @@ pub fn run() {
             db_manager::verify_master_password,
             db_manager::set_master_password,
             db_manager::take_pending_seed_admin,
+            db_manager::run_auto_backup_if_due,
+            db_manager::get_auto_backup_dir,
+            db_manager::set_auto_backup_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

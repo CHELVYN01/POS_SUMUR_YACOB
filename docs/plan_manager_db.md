@@ -118,3 +118,125 @@ Tambah `"dialog:allow-open"` (untuk pilih file `.zip` saat restore — saat ini 
 
 Sesuai instruksi project, saya tidak akan menjalankan `npm run tauri dev` /
 build app sendiri — user yang akan running dan test manual setelah kode selesai.
+
+Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.
+
+In plan mode, you should:
+1. Thoroughly explore the codebase to understand existing patterns
+2. Identify similar features and architectural approaches
+3. Consider multiple approaches and their trade-offs
+4. Use AskUserQuestion if you need to clarify the approach
+5. Design a concrete implementation strategy
+6. When ready, use ExitPlanMode to present your plan for approval
+
+Remember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase.
+
+
+# Fase 15 — Auto-Backup Mingguan (lokal)
+
+## Context
+
+Fase 13 sudah menyediakan backup **manual** (klik tombol di Database Manager).
+Client sekarang minta lapisan tambahan: backup **otomatis** supaya tidak
+bergantung pada kedisiplinan mengklik tombol. Sesuai keputusan yang sudah
+diambil bersama user:
+
+- Disimpan ke **folder lokal tetap** di laptop (`Documents/POS-Backup/`),
+  belum ke cloud — Supabase belum ada sama sekali di project ini, itu scope terpisah.
+- **Trigger**: dicek setiap kali app dibuka (bukan scheduler OS/Task Scheduler
+  yang butuh app headless) — kalau sudah ≥7 hari sejak backup otomatis
+  terakhir, jalankan backup di background, tanpa perlu user klik apapun.
+- **Retensi**: simpan 4 file terbaru, backup otomatis yang lebih lama
+  otomatis dihapus. (Backup manual dari Database Manager tidak disentuh oleh
+  retensi ini — retensi hanya berlaku untuk file yang dibuat oleh mekanisme
+  auto-backup, disimpan di folder & pola nama terpisah.)
+
+Ini murni tambahan pada `db_manager.rs` yang sudah ada — reuse pola zip/backup
+yang sudah teruji (fase 13), bukan bikin mekanisme backup baru dari nol.
+
+## Desain
+
+### Rust — `pos-app/src-tauri/src/db_manager.rs`
+
+**Command baru** `run_auto_backup_if_due(app: AppHandle) -> Result<bool, String>`
+- Baca `last-auto-backup.json` dari app **config** dir (folder yang sama tempat
+  `db-manager-auth.json` fase 13 disimpan — bukan app data dir, supaya tidak
+  ikut kebawa reset/restore yang hanya menyentuh `pos.db`).
+  - Kalau file tidak ada, atau `last_backup_at` sudah ≥ 7 hari yang lalu → lanjut backup.
+  - Kalau belum 7 hari → return `Ok(false)` (tidak ada yang terjadi), supaya
+    frontend tahu tidak perlu tampilkan notifikasi apapun.
+- Resolve folder tujuan: `dirs::document_dir()` + `"POS-Backup"` — `fs::create_dir_all` kalau belum ada.
+- Nama file: `auto-backup-pos-YYYYMMDD-HHMMSS.zip` (prefix `auto-` membedakan
+  dari backup manual `backup-pos-...zip` yang user buat sendiri dari Database
+  Manager, supaya retensi 4-file tidak pernah menghapus backup manual milik user).
+- Reuse logic compress yang sama persis dengan `backup_database()` (baca
+  `pos.db`, tulis ke `zip::ZipWriter` dengan entry `pos.db`) — faktorkan jadi
+  helper `fn write_db_zip(db_bytes: &[u8], dest: &Path) -> Result<(), String>`
+  dipakai baik oleh `backup_database` maupun `run_auto_backup_if_due`, supaya
+  tidak duplikasi kode compress.
+- Setelah backup berhasil: tulis ulang `last-auto-backup.json` dengan timestamp sekarang.
+- **Retensi**: list semua file `auto-backup-pos-*.zip` di folder tujuan, urutkan
+  by filename (nama sudah mengandung timestamp jadi urutan string = urutan
+  waktu), hapus yang paling lama sampai tersisa maksimal 4.
+- Return `Ok(true)` kalau backup baru dibuat (supaya frontend bisa opsional
+  kasih notifikasi singkat "Backup otomatis berhasil"), `Ok(false)` kalau belum waktunya.
+
+**Tidak** perlu WAL checkpoint eksplisit lewat `getDb()` seperti backup manual
+di fase 13 (itu dipanggil dari halaman Database Manager yang punya akses ke
+`getDb()`). Command ini dipanggil dari `(app)/+layout.svelte` yang **sudah**
+punya koneksi `getDb()` aktif (dipakai halaman kasir dkk) — jadi frontend
+tetap yang menjalankan `PRAGMA wal_checkpoint(TRUNCATE);` sebelum invoke,
+persis pola yang sudah ada, supaya konsisten & tidak perlu koneksi SQLite kedua di Rust.
+
+### Frontend
+
+**Ubah** `pos-app/src/routes/(app)/+layout.svelte` — di `onMount`, setelah user
+dipastikan login, panggil (fire-and-forget, tidak blocking render):
+```ts
+import { runAutoBackupIfDue } from '$lib/db-manager';
+import { getDb } from '$lib/db';
+
+async function autoBackupCheck() {
+	try {
+		const db = await getDb();
+		await db.execute('PRAGMA wal_checkpoint(TRUNCATE);');
+		await runAutoBackupIfDue();
+	} catch (e) {
+		console.error('Auto-backup gagal:', e);
+	}
+}
+```
+Dipanggil sekali di `onMount`, tidak mengganggu UI kalau gagal (cukup log ke
+console — bukan hal yang harus mem-block user kerja, sesuai sifat "housekeeping
+otomatis"). Tidak ada UI progress/spinner untuk ini (background silent), beda
+dengan backup manual di Database Manager yang punya UI eksplisit.
+
+**Tambah** `pos-app/src/lib/db-manager/index.ts` — satu fungsi baru:
+```ts
+export function runAutoBackupIfDue(): Promise<boolean> {
+	return invoke('run_auto_backup_if_due');
+}
+```
+
+### Capability
+
+Tidak perlu perubahan `capabilities/default.json` — command custom baru ini
+tidak butuh permission plugin (sama seperti command fase 13 lainnya), dan
+tidak pakai dialog/fs plugin dari sisi frontend (semua file I/O terjadi di Rust).
+
+## File yang disentuh
+
+- `pos-app/src-tauri/src/db_manager.rs` — command baru + helper zip yang di-refactor supaya reusable
+- `pos-app/src/lib/db-manager/index.ts` — tambah `runAutoBackupIfDue()`
+- `pos-app/src/routes/(app)/+layout.svelte` — panggil cek auto-backup di `onMount`
+
+## Verifikasi
+
+- `cargo check` + `npm run check` untuk memastikan build bersih (dijalankan
+  oleh Claude, sesuai instruksi project — app sendiri tidak dijalankan oleh Claude).
+- User test manual: buka app → cek folder `Documents/POS-Backup/` muncul file
+  `auto-backup-pos-<timestamp>.zip` pertama kali. Untuk simulasi "7 hari
+  berlalu" tanpa nunggu beneran, user bisa edit manual `last-auto-backup.json`
+  di app config dir (`%APPDATA%\com.cj.pos-app\last-auto-backup.json`) mundur
+  8 hari, lalu buka app lagi — harus muncul file backup baru & retensi
+  memangkas jadi maksimal 4 kalau sudah lebih dari itu.

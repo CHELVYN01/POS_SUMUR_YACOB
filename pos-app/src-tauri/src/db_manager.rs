@@ -21,6 +21,16 @@ struct MasterAuth {
     updated_at: String,
 }
 
+#[derive(Serialize, Deserialize, Default)]
+struct AutoBackupState {
+    last_backup_at: Option<u64>,
+    custom_dir: Option<String>,
+}
+
+const AUTO_BACKUP_INTERVAL_SECS: u64 = 7 * 24 * 60 * 60;
+const AUTO_BACKUP_RETAIN: usize = 4;
+const AUTO_BACKUP_PREFIX: &str = "auto-backup-pos-";
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SeedAdmin {
     nama: String,
@@ -62,12 +72,15 @@ fn seed_pending_path(dir: &Path) -> PathBuf {
     dir.join("pos.db.seed-pending.json")
 }
 
-fn timestamp() -> String {
-    let now = SystemTime::now()
+fn now_secs() -> u64 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs();
-    now.to_string()
+        .as_secs()
+}
+
+fn timestamp() -> String {
+    now_secs().to_string()
 }
 
 /// Must run before the sql plugin is mounted (no live SQLite connection yet at this point in
@@ -118,22 +131,132 @@ pub fn take_pending_seed_admin(app: AppHandle) -> Result<Option<SeedAdmin>, Stri
     Ok(Some(admin))
 }
 
-#[tauri::command]
-pub fn backup_database(app: AppHandle, dest_path: String) -> Result<(), String> {
-    let dir = app_data_dir(&app)?;
-    let db = db_path(&dir);
-    let bytes = fs::read(&db).map_err(|e| format!("Gagal membaca database: {e}"))?;
-
-    let file = fs::File::create(&dest_path).map_err(|e| format!("Gagal membuat file zip: {e}"))?;
+fn write_db_zip(db_bytes: &[u8], dest: &Path) -> Result<(), String> {
+    let file = fs::File::create(dest).map_err(|e| format!("Gagal membuat file zip: {e}"))?;
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
     zip.start_file(DB_FILE_NAME, options)
         .map_err(|e| e.to_string())?;
-    zip.write_all(&bytes).map_err(|e| e.to_string())?;
+    zip.write_all(db_bytes).map_err(|e| e.to_string())?;
     zip.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn backup_database(app: AppHandle, dest_path: String) -> Result<(), String> {
+    let dir = app_data_dir(&app)?;
+    let db = db_path(&dir);
+    let bytes = fs::read(&db).map_err(|e| format!("Gagal membaca database: {e}"))?;
+    write_db_zip(&bytes, Path::new(&dest_path))
+}
+
+fn default_auto_backup_dir() -> Result<PathBuf, String> {
+    let base = dirs::document_dir().ok_or("Tidak bisa menemukan folder Documents")?;
+    Ok(base.join("POS-Backup"))
+}
+
+fn auto_backup_state_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_config_dir(app)?.join("last-auto-backup.json"))
+}
+
+fn read_auto_backup_state(app: &AppHandle) -> Result<AutoBackupState, String> {
+    let path = auto_backup_state_path(app)?;
+    match fs::read_to_string(&path) {
+        Ok(raw) => Ok(serde_json::from_str(&raw).unwrap_or_default()),
+        Err(_) => Ok(AutoBackupState::default()),
+    }
+}
+
+fn write_auto_backup_state(app: &AppHandle, state: &AutoBackupState) -> Result<(), String> {
+    let path = auto_backup_state_path(app)?;
+    fs::create_dir_all(app_config_dir(app)?).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+/// Resolves where auto-backups should be written: the user's chosen folder if it's still
+/// set and accessible, otherwise Documents/POS-Backup — auto-backup must never simply stop
+/// working just because a chosen drive (e.g. a flash disk) became unavailable.
+fn resolve_auto_backup_dir(state: &AutoBackupState) -> Result<PathBuf, String> {
+    if let Some(custom) = &state.custom_dir {
+        let path = PathBuf::from(custom);
+        if path.is_dir() {
+            return Ok(path);
+        }
+    }
+    default_auto_backup_dir()
+}
+
+#[tauri::command]
+pub fn get_auto_backup_dir(app: AppHandle) -> Result<String, String> {
+    let state = read_auto_backup_state(&app)?;
+    let dir = resolve_auto_backup_dir(&state)?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn set_auto_backup_dir(app: AppHandle, dir: String) -> Result<(), String> {
+    if !Path::new(&dir).is_dir() {
+        return Err("Folder tidak ditemukan".to_string());
+    }
+    let mut state = read_auto_backup_state(&app)?;
+    state.custom_dir = Some(dir);
+    write_auto_backup_state(&app, &state)
+}
+
+fn prune_old_auto_backups(dir: &Path) -> Result<(), String> {
+    let mut files: Vec<PathBuf> = fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with(AUTO_BACKUP_PREFIX) && n.ends_with(".zip"))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    // Epoch-seconds are embedded in the filename, so lexicographic order = chronological order.
+    files.sort();
+
+    if files.len() > AUTO_BACKUP_RETAIN {
+        let to_remove = files.len() - AUTO_BACKUP_RETAIN;
+        for old in &files[..to_remove] {
+            let _ = fs::remove_file(old);
+        }
+    }
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn run_auto_backup_if_due(app: AppHandle) -> Result<bool, String> {
+    let mut state = read_auto_backup_state(&app)?;
+    let now = now_secs();
+
+    if let Some(last) = state.last_backup_at {
+        if now.saturating_sub(last) < AUTO_BACKUP_INTERVAL_SECS {
+            return Ok(false);
+        }
+    }
+
+    let dir = app_data_dir(&app)?;
+    let db = db_path(&dir);
+    let bytes = fs::read(&db).map_err(|e| format!("Gagal membaca database: {e}"))?;
+
+    let backup_dir = resolve_auto_backup_dir(&state)?;
+    fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
+    let dest = backup_dir.join(format!("{AUTO_BACKUP_PREFIX}{now}.zip"));
+    write_db_zip(&bytes, &dest)?;
+
+    prune_old_auto_backups(&backup_dir)?;
+
+    state.last_backup_at = Some(now);
+    write_auto_backup_state(&app, &state)?;
+
+    Ok(true)
 }
 
 fn read_and_validate_zip(zip_path: &str) -> Result<Vec<u8>, String> {

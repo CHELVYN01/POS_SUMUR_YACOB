@@ -3,7 +3,8 @@
 	import { listUsers, tambahUser, hapusUser, usernameTersedia } from '$lib/db/users';
 	import { currentUser } from '$lib/stores/session';
 	import { tokoInfo } from '$lib/stores/toko';
-	import { setMasterPassword } from '$lib/db-manager';
+	import { setMasterPassword, getAutoBackupDir, setAutoBackupDir } from '$lib/db-manager';
+	import { open } from '@tauri-apps/plugin-dialog';
 	import type { User } from '$lib/types';
 
 	let users = $state<User[]>([]);
@@ -34,9 +35,16 @@
 	let masterPasswordSaving = $state(false);
 	let masterPasswordTersimpan = $state(false);
 
+	let autoBackupDir = $state('');
+	let autoBackupError = $state('');
+	let autoBackupTersimpan = $state(false);
+
 	onMount(async () => {
 		users = await listUsers();
 		loading = false;
+		if (isAdmin) {
+			autoBackupDir = await getAutoBackupDir();
+		}
 	});
 
 	function simpanToko(event: Event) {
@@ -118,6 +126,21 @@
 			masterPasswordError = String(err);
 		} finally {
 			masterPasswordSaving = false;
+		}
+	}
+
+	async function pilihFolderBackup() {
+		autoBackupError = '';
+		try {
+			const dipilih = await open({ directory: true, defaultPath: autoBackupDir || undefined });
+			if (!dipilih || Array.isArray(dipilih)) return;
+
+			await setAutoBackupDir(dipilih);
+			autoBackupDir = dipilih;
+			autoBackupTersimpan = true;
+			setTimeout(() => (autoBackupTersimpan = false), 2000);
+		} catch (err) {
+			autoBackupError = String(err);
 		}
 	}
 </script>
@@ -236,6 +259,27 @@
 			<p class="muted">Backup data ke cloud (Supabase) belum aktif — akan tersedia di fase berikutnya.</p>
 			<button disabled>Sinkronkan Sekarang</button>
 		</section>
+
+		{#if isAdmin}
+			<section class="card section">
+				<h2>Lokasi Auto-Backup</h2>
+				<p class="muted">
+					Setiap 7 hari, aplikasi otomatis membuat backup database ke folder ini (4 file terbaru
+					disimpan). Kalau folder ini tidak ditemukan lagi, backup akan otomatis dipindah ke
+					Documents/POS-Backup.
+				</p>
+				<div class="folder-row">
+					<input value={autoBackupDir} readonly placeholder="Documents/POS-Backup" />
+					<button onclick={pilihFolderBackup}>Pilih Folder</button>
+				</div>
+				{#if autoBackupError}
+					<p class="error">{autoBackupError}</p>
+				{/if}
+				{#if autoBackupTersimpan}
+					<span class="saved-hint">Tersimpan</span>
+				{/if}
+			</section>
+		{/if}
 	{/if}
 
 	{#if tab === 'keamanan' && isAdmin}
@@ -434,6 +478,16 @@
 		align-items: center;
 		gap: 0.8rem;
 		margin-top: 1rem;
+	}
+
+	.folder-row {
+		display: flex;
+		gap: 0.6rem;
+	}
+
+	.folder-row input {
+		flex: 1;
+		min-width: 0;
 	}
 
 	.saved-hint {

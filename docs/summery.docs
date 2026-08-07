@@ -1,0 +1,101 @@
+# Ringkasan Aplikasi POS Sumur Yacob
+
+## Apa Itu Aplikasi Ini?
+
+Aplikasi kasir (Point of Sale) untuk kios/warung Sumur Yacob. Aplikasi ini
+dipasang langsung di komputer/laptop toko (bukan aplikasi web), sehingga
+**tetap bisa dipakai walau tidak ada internet**. Semua data transaksi,
+barang, dan laporan tersimpan aman di komputer toko.
+
+---
+
+## Fitur-Fitur Utama
+
+### 1. Login & Multi-Kasir
+- Setiap kasir punya akun sendiri untuk masuk ke aplikasi.
+- Admin bisa menambah atau menghapus akun kasir lain lewat menu Pengaturan.
+
+### 2. Produk (Input Barang)
+- Catat semua barang dagangan: nama, harga jual, dan stok (stok bersifat
+  opsional, tidak wajib diisi).
+- Harga bisa diubah sewaktu-waktu, misalnya saat ada kenaikan harga atau
+  promo/bonus.
+- Setiap barang punya barcode sendiri — bisa diinput manual atau langsung
+  scan pakai alat scanner barcode.
+
+### 3. Penjualan (Kasir)
+- Transaksi jual barang cukup dengan scan barcode, otomatis masuk ke
+  keranjang belanja.
+- Saat pembayaran, kasir input jumlah uang yang diberikan pembeli, aplikasi
+  otomatis menghitung kembalian.
+- Muncul struk/invoice sebelum transaksi dikonfirmasi, supaya kasir bisa cek
+  ulang sebelum benar-benar bayar.
+- Kalau stok barang sudah habis (stok 0) tapi tetap mau dijual, aplikasi
+  akan menampilkan peringatan dan meminta konfirmasi dulu.
+- Stok barang otomatis berkurang setiap kali ada transaksi berhasil.
+
+### 4. Kas Bon (Utang Barang)
+- Untuk pelanggan yang mengambil barang tapi bayar belakangan (ngutang).
+- Bisa catat banyak barang sekaligus dalam satu bon, dengan tanggal janji
+  bayar.
+- Mendukung pembayaran cicilan (bertahap) sampai lunas.
+
+### 5. Laporan
+- Rekap penjualan harian dan rekap kas bon, ditampilkan dalam satu halaman
+  Laporan dengan tab terpisah.
+- Bisa export laporan ke **file Excel**, lengkap dengan 3 sheet: Dashboard
+  ringkasan, detail Penjualan, dan detail Bon — sudah rapi dengan format
+  angka rupiah dan warna.
+
+### 6. Pengaturan
+- Atur nama toko dan alamat yang tampil di aplikasi.
+- Kelola daftar user/kasir.
+- Atur keamanan (ganti password khusus Database Manager).
+
+### 7. Database Manager — Backup, Restore & Buat Baru (di Layar Login)
+Fitur ini terpisah dari halaman utama, bisa diakses lewat link kecil di
+layar login, dan dilindungi password khusus (beda dari password kasir).
+
+- **Backup**: Simpan seluruh data toko (barang, transaksi, bon, user) ke satu
+  file `.zip`. File ini bisa disimpan di flashdisk, cloud pribadi, atau
+  dipindah ke komputer lain.
+- **Restore**: Jika file backup `.zip` dimasukkan kembali ke aplikasi, semua
+  data akan otomatis terisi seperti kondisi saat backup dibuat — cocok untuk
+  pindah komputer atau memulihkan data setelah masalah.
+- **Buat Baru (Reset)**: Mengosongkan seluruh data dan mulai dari awal
+  dengan akun admin baru — sebelum reset, aplikasi otomatis membuat cadangan
+  data lama dulu supaya tidak hilang.
+- Ada peringatan tegas sebelum restore/reset dijalankan, karena aksi ini
+  mengganti seluruh data yang ada saat ini.
+
+### 8. Auto-Backup Mingguan
+- Selain backup manual di atas, aplikasi juga otomatis membuat cadangan data
+  setiap kali dibuka, kalau sudah lebih dari 7 hari sejak backup otomatis
+  terakhir.
+- File cadangan otomatis disimpan di folder `Documents/POS-Backup/` di
+  komputer, dan aplikasi hanya menyimpan 4 file terbaru (yang paling lama
+  otomatis dihapus supaya tidak memenuhi penyimpanan).
+- Ini berjalan di belakang layar tanpa perlu kasir melakukan apa-apa.
+
+### 9. Catatan Aktivitas (Log)
+- Ada pencatatan singkat (24 jam terakhir) untuk aktivitas scan/input di
+  halaman Penjualan dan Produk — berguna untuk melacak kalau ada kesalahan
+  input atau scan barcode.
+
+---
+
+## Kelebihan Aplikasi Ini
+
+- **Bisa dipakai tanpa internet** — cocok untuk warung/kios dengan koneksi
+  internet yang tidak stabil.
+- **Data aman dengan backup berlapis** — backup manual kapan saja + backup
+  otomatis mingguan.
+- **Tampilan sederhana dan minimalis** — mudah dipakai kasir tanpa perlu
+  training lama.
+- **Mendukung banyak kasir** dengan akun masing-masing.
+- **Laporan siap pakai dalam format Excel** untuk kebutuhan pembukuan.
+
+---
+
+*Dokumen ini adalah ringkasan fitur untuk keperluan pemahaman umum, dibuat
+berdasarkan progres pengembangan aplikasi POS Sumur Yacob per Agustus 2026.*

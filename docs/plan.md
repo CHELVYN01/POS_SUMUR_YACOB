@@ -111,7 +111,7 @@ saya ada case gini jadi saya mau kita bisa backup data otomatis atau menggunakan
 - untuk download bentuk file nya zip
 - jadi misla kita import data backup atau kita restore datanya kembali semua gitu kaya di odoo gitu 
 
-plan fase 13
+plan fase 13 ✅
 
 - Backup (manual, tombol di Pengaturan):
 
@@ -157,6 +157,20 @@ plan fase 14 ✅
 - perbaiki label 
   - jual barang >> Penjualan
   - input barang >> produk
+
+
+plan fase 15 ✅
+Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.
+
+In plan mode, you should:
+1. Thoroughly explore the codebase to understand existing patterns
+2. Identify similar features and architectural approaches
+3. Consider multiple approaches and their trade-offs
+4. Use AskUserQuestion if you need to clarify the approach
+5. Design a concrete implementation strategy
+6. When ready, use ExitPlanMode to present your plan for approval
+
+Remember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase.
 
 
 
