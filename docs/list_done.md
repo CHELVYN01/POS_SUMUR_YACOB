@@ -17,3 +17,4 @@ Format: `tanggal pengerjaan - nama feat - git commit`
 - 2026-08-07 - fix 2: input uang dibayar & kembalian otomatis di popup invoice kasir, tombol shortcut Uang Pas, validasi cegah bayar jika uang kurang - 28b7d7d
 - 2026-08-07 - fix 3: hapus barang error FOREIGN KEY constraint (migration ON DELETE SET NULL untuk item_penjualan & item_kasbon), tambah konfirmasi & pesan error saat hapus barang - a421dfb
 - 2026-08-08 - fase 13: Database Manager ala Odoo di layar login (Backup/Restore/Buat Baru via zip, master password terpisah, file-swap aman sebelum restart), Pengaturan diubah jadi tab (Umum/User/Sinkronisasi/Keamanan) - d3bbdd9
+- 2026-08-08 - fase 14: warning popup stok habis saat bayar di kasir, stok otomatis berkurang setelah pembayaran, rename label Jual Barang/Input Barang jadi Penjualan/Produk - 2b66e19
