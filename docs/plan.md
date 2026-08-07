@@ -6,7 +6,7 @@ requirment client
 sistem pos menggunakan 
 
 
-- input barang harga dan (buat jumlah barang stock di lepass)
+- input barang harga
 - langsung jual brang nya (dengan menggunakan barcode)
 - bisaa edit harga jika ada kenaikan atau bonus 
 - barcode 
@@ -113,8 +113,7 @@ saya ada case gini jadi saya mau kita bisa backup data otomatis atau menggunakan
 
 plan fase 13
 
-Fase 12 — Backup & Restore Data (via ZIP)
-Backup (manual, tombol di Pengaturan):
+- Backup (manual, tombol di Pengaturan):
 
 User klik "Backup Data"
 Rust command copy pos.db (+ .db-wal/.db-shm kalau ada) → zip
@@ -125,21 +124,22 @@ User klik "Restore Data" → open dialog pilih file .zip
 Warning keras: "Semua data saat ini akan ditimpa total dan tidak bisa dibatalkan. Lanjutkan?"
 Rust command: backup dulu pos.db lama → pos.db.bak (safety net) → extract zip → validasi file db valid → replace pos.db
 App auto-restart (relaunch) supaya koneksi SQLite fresh
-Scope fase ini:
+
+- Scope fase ini:
 
 Manual only (bukan auto-backup terjadwal — itu fase terpisah nanti)
 Local file save only (belum upload ke Supabase — nyusul fase lain)
 Replace total, bukan merge
-Perubahan teknis:
+
+- Perubahan teknis:
 
 Cargo.toml: tambah crate zip
 src-tauri/src/: command baru backup_database & restore_database
 pengaturan/: UI 2 tombol + dialog konfirmasi restore
 Ini sudah cukup jelas untuk mulai coding. Mau saya lanjut implementasi sekarang, atau ada bagian yang mau disesuaikan dulu?
 
-# importan (saya ingin desain backup data dan resote itu kaya odoo jadi di form login ada management database jika kita klik itu maka akan muncul tampilan databasae seperti di odoo di mana kita bisa hapus restoe dan backup bahkan duplikat dan buat baru ini sangat penting yah)
+#### importan (saya ingin desain backup data dan resote itu kaya odoo jadi di form login ada management database jika kita klik itu maka akan muncul tampilan databasae seperti di odoo di mana kita bisa hapus restoe dan backup bahkan duplikat dan buat baru ini sangat penting yah)
 
-fase 13 ✅ (hasil pengerjaan, komit d3bbdd9)
 - halaman /database-manager terpisah, diakses dari link kecil di bawah form login (bukan tombol di Pengaturan seperti rencana awal fase 12, sesuai catatan "importan" di atas)
 - dilindungi master password terpisah dari login user (default admin123, argon2 hash, bisa diubah admin dari Pengaturan)
 - Backup: checkpoint WAL lalu compress pos.db ke .zip, save dialog nama default backup-pos-YYYYMMDD-HHMMSS.zip
@@ -148,6 +148,15 @@ fase 13 ✅ (hasil pengerjaan, komit d3bbdd9)
 - fitur Duplikat dicoret sesuai arahan user (scope tetap 1 database aktif, bukan multi-database)
 - teknis: restore/reset tidak pernah menimpa pos.db saat proses masih hidup (Windows file-locking) — file swap terjadi di awal proses baru sebelum plugin SQL mount; seed data awal (admin+barang contoh) dipindah dari migration ke logic frontend supaya reset bisa hasilkan database benar-benar kosong
 - tambahan di luar rencana awal: halaman Pengaturan diubah dari 1 kolom panjang jadi tab (Umum/User/Sinkronisasi/Keamanan), mengikuti pola tab yang sudah ada di Laporan
+
+plan fase 14 ✅
+- dari requirment terbaru client minta perbaiki stock 
+- stock itu tetap opsional tapi klo stock nya 0 masuk ke penjualan 
+- buatkan warning popup (Stock Habis, apakah kamu mau lanjutkan pembayaran)
+- kalau ya maka tetap bayar, kalau batal yah tidak jadi gitu fungsi cuman munculkan warning aja 
+- perbaiki label 
+  - jual barang >> Penjualan
+  - input barang >> produk
 
 
 

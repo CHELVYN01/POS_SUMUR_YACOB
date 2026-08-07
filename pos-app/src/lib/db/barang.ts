@@ -60,3 +60,13 @@ export async function hapusBarang(id: number): Promise<void> {
 	const db = await getDb();
 	await db.execute('DELETE FROM barang WHERE id = $1', [id]);
 }
+
+export async function kurangiStokBarang(items: { barangId: number; jumlah: number }[]): Promise<void> {
+	const db = await getDb();
+	for (const item of items) {
+		await db.execute(
+			'UPDATE barang SET qty = MAX(qty - $1, 0) WHERE id = $2 AND qty IS NOT NULL',
+			[item.jumlah, item.barangId]
+		);
+	}
+}

@@ -103,7 +103,7 @@
 		formError = '';
 
 		if (!nama.trim()) {
-			formError = 'Nama barang wajib diisi';
+			formError = 'Nama produk wajib diisi';
 			return;
 		}
 		if (harga === undefined) {
@@ -121,10 +121,10 @@
 
 		if (editId !== null) {
 			await updateBarang(editId, input);
-			catatLog(`Edit barang ${input.nama}${ringkasPerubahan(editSebelum, input)}`);
+			catatLog(`Edit produk ${input.nama}${ringkasPerubahan(editSebelum, input)}`);
 		} else {
 			await tambahBarang(input);
-			catatLog(`Tambah barang ${input.nama}`);
+			catatLog(`Tambah produk ${input.nama}`);
 		}
 
 		barangList = await listBarang();
@@ -144,18 +144,18 @@
 
 	async function hapus(id: number) {
 		const target = barangList.find((b) => b.id === id);
-		if (target && !confirm(`Hapus barang "${target.nama}"?`)) return;
+		if (target && !confirm(`Hapus produk "${target.nama}"?`)) return;
 
 		try {
 			await hapusBarang(id);
 		} catch (err) {
-			formError = 'Gagal menghapus barang. Coba lagi.';
+			formError = 'Gagal menghapus produk. Coba lagi.';
 			console.error(err);
 			return;
 		}
 
 		barangList = await listBarang();
-		if (target) catatLog(`Hapus barang ${target.nama}`);
+		if (target) catatLog(`Hapus produk ${target.nama}`);
 		if (editId === id) resetForm();
 	}
 
@@ -173,7 +173,7 @@
 <div class="produk">
 	<div class="side-col">
 		<section class="card form-panel">
-			<h2>{editId !== null ? 'Edit Barang' : 'Tambah Barang'}</h2>
+			<h2>{editId !== null ? 'Edit Produk' : 'Tambah Produk'}</h2>
 			<form onsubmit={simpan}>
 				<label for="barcode">Barcode <span class="opt required">(wajib, scan atau ketik manual)</span></label>
 				<input
@@ -185,7 +185,7 @@
 					autofocus
 				/>
 
-				<label for="nama">Nama Barang</label>
+				<label for="nama">Nama Produk</label>
 				<input id="nama" bind:value={nama} bind:this={namaInput} placeholder="mis. Beras 5kg" />
 
 				<label for="harga">Harga (Rp) <span class="opt required">(wajib)</span></label>
@@ -202,7 +202,7 @@
 					{#if editId !== null}
 						<button type="button" onclick={resetForm}>Batal</button>
 					{/if}
-					<button type="submit" class="primary">{editId !== null ? 'Simpan Perubahan' : 'Tambah Barang'}</button>
+					<button type="submit" class="primary">{editId !== null ? 'Simpan Perubahan' : 'Tambah Produk'}</button>
 				</div>
 			</form>
 		</section>
@@ -225,11 +225,11 @@
 	</div>
 
 	<section class="list-panel">
-		<h1>Daftar Barang</h1>
+		<h1>Daftar Produk</h1>
 		<table>
 			<thead>
 				<tr>
-					<th>Nama Barang</th>
+					<th>Nama Produk</th>
 					<th>Barcode</th>
 					<th>Harga</th>
 					<th>Stok</th>

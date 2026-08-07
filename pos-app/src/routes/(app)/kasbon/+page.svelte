@@ -100,7 +100,7 @@
 			return;
 		}
 		if (cart.length === 0) {
-			formError = 'Pilih minimal satu barang';
+			formError = 'Pilih minimal satu produk';
 			return;
 		}
 		if (!$currentUser) {
@@ -248,12 +248,12 @@
 		</div>
 
 		<div class="pilih-barang">
-			<input class="search" placeholder="Cari barang..." bind:value={cari} />
+			<input class="search" placeholder="Cari produk..." bind:value={cari} />
 			<div class="barang-list-wrap">
 				<table>
 					<thead>
 						<tr>
-							<th>Nama Barang</th>
+							<th>Nama Produk</th>
 							<th>Harga</th>
 							<th></th>
 						</tr>
@@ -269,7 +269,7 @@
 							</tr>
 						{/each}
 						{#if barangFiltered.length === 0}
-							<tr><td colspan="3" class="empty">Barang tidak ditemukan</td></tr>
+							<tr><td colspan="3" class="empty">Produk tidak ditemukan</td></tr>
 						{/if}
 					</tbody>
 				</table>
@@ -278,12 +278,12 @@
 
 		<div class="cart-table-wrap">
 			{#if cart.length === 0}
-				<p class="empty">Belum ada barang dipilih</p>
+				<p class="empty">Belum ada produk dipilih</p>
 			{:else}
 				<table>
 					<thead>
 						<tr>
-							<th>Barang</th>
+							<th>Produk</th>
 							<th>Jml</th>
 							<th>Subtotal</th>
 							<th></th>

@@ -19,12 +19,12 @@
 	const menu = [
 		{
 			href: '/kasir',
-			label: 'Jual Barang',
+			label: 'Penjualan',
 			icon: 'M3 4h2l1.4 10.6A2 2 0 0 0 8.4 16.6h8.2a2 2 0 0 0 2-1.6L20 8H6.2 M9 20.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z M16.5 20.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z'
 		},
 		{
 			href: '/produk',
-			label: 'Input Barang',
+			label: 'Produk',
 			icon: 'M3.5 7.5 12 3l8.5 4.5-8.5 4.5-8.5-4.5Z M3.5 7.5V16.5L12 21l8.5-4.5V7.5 M12 12v9'
 		},
 		{

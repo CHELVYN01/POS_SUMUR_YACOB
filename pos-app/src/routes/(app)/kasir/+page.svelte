@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { listBarang, cariBarangByBarcode } from '$lib/db/barang';
+	import { listBarang, cariBarangByBarcode, kurangiStokBarang } from '$lib/db/barang';
 	import { simpanPenjualan } from '$lib/db/penjualan';
 	import { currentUser } from '$lib/stores/session';
 	import { tandaiScan } from '$lib/stores/scanStatus';
@@ -17,6 +17,7 @@
 	let sudahBayar = $state(false);
 	let uangDibayar = $state('');
 	let ringkasanBayar = $state<{ total: number; kembalian: number } | null>(null);
+	let showStokHabis = $state(false);
 	let log = $state<LogEntry[]>([]);
 	let scanInput = $state<HTMLInputElement | null>(null);
 	let uangInput = $state<HTMLInputElement | null>(null);
@@ -54,6 +55,9 @@
 	let uangDibayarNum = $derived(Number(uangDibayar) || 0);
 	let kembalian = $derived(uangDibayarNum - total);
 	let bayarValid = $derived(uangDibayarNum >= total);
+	let adaStokHabis = $derived(
+		cart.some((item) => daftarBarang.find((b) => b.id === item.barangId)?.qty === 0)
+	);
 
 	function tambah(barang: Barang) {
 		const existing = cart.find((c) => c.barangId === barang.id);
@@ -135,6 +139,19 @@
 		uangInput?.focus();
 	}
 
+	function klikBayar() {
+		if (adaStokHabis) {
+			showStokHabis = true;
+			return;
+		}
+		bayar();
+	}
+
+	function lanjutkanMeskiStokHabis() {
+		showStokHabis = false;
+		bayar();
+	}
+
 	async function bayar() {
 		if (cart.length === 0 || !$currentUser || !bayarValid) return;
 		membayar = true;
@@ -142,6 +159,8 @@
 			const totalBayar = total;
 			const kembalianAkhir = kembalian;
 			await simpanPenjualan($currentUser.id, cart);
+			await kurangiStokBarang(cart.map((item) => ({ barangId: item.barangId, jumlah: item.jumlah })));
+			daftarBarang = await listBarang();
 			catatLog(
 				`Bayar — total ${formatRupiah(totalBayar)}, kembalian ${formatRupiah(kembalianAkhir)}`
 			);
@@ -161,19 +180,19 @@
 				class="scan-input"
 				bind:value={scan}
 				bind:this={scanInput}
-				placeholder="Scan barcode atau ketik nama barang..."
+				placeholder="Scan barcode atau ketik nama produk..."
 				autofocus
 			/>
 		</form>
 
 		<div class="cart-table-wrap">
 			{#if cart.length === 0}
-				<p class="empty">Belum ada barang dipilih — scan barcode untuk mulai</p>
+				<p class="empty">Belum ada produk dipilih — scan barcode untuk mulai</p>
 			{:else}
 				<table>
 					<thead>
 						<tr>
-							<th>Barang</th>
+							<th>Produk</th>
 							<th>Jml</th>
 							<th>Subtotal</th>
 							<th></th>
@@ -219,14 +238,14 @@
 
 	<div class="side-col">
 		<section class="panel list-panel card">
-			<h1>Jual Barang</h1>
-			<input class="search" placeholder="Cari barang..." bind:value={cari} />
+			<h1>Daftar Produk</h1>
+			<input class="search" placeholder="Cari produk..." bind:value={cari} />
 
 			<div class="list-table-wrap">
 				<table>
 					<thead>
 						<tr>
-							<th>Nama Barang</th>
+							<th>Nama Produk</th>
 							<th>Harga</th>
 							<th></th>
 						</tr>
@@ -242,7 +261,7 @@
 							</tr>
 						{/each}
 						{#if barangFiltered.length === 0}
-							<tr><td colspan="3" class="empty">Barang tidak ditemukan</td></tr>
+							<tr><td colspan="3" class="empty">Produk tidak ditemukan</td></tr>
 						{/if}
 					</tbody>
 				</table>
@@ -321,7 +340,7 @@
 
 				<div class="invoice-actions">
 					<button onclick={tutupInvoice} disabled={membayar}>Batal</button>
-					<button class="primary" onclick={bayar} disabled={membayar || !bayarValid}>
+					<button class="primary" onclick={klikBayar} disabled={membayar || !bayarValid}>
 						{membayar ? 'Menyimpan...' : 'Konfirmasi Bayar'}
 					</button>
 				</div>
@@ -340,6 +359,21 @@
 					<button class="primary" onclick={tutupInvoice}>Selesai</button>
 				</div>
 			{/if}
+		</div>
+	</div>
+{/if}
+
+{#if showStokHabis}
+	<div class="invoice-overlay" role="presentation">
+		<div class="stok-warning-card card">
+			<h2>Stok Habis</h2>
+			<p>
+				Ada produk di keranjang yang stoknya sudah 0. Apakah kamu mau lanjutkan pembayaran?
+			</p>
+			<div class="invoice-actions">
+				<button onclick={() => (showStokHabis = false)}>Batal</button>
+				<button class="primary" onclick={lanjutkanMeskiStokHabis}>Lanjutkan Bayar</button>
+			</div>
 		</div>
 	</div>
 {/if}
@@ -602,5 +636,24 @@
 		flex: 1;
 		padding: 0.75em 1em;
 		font-size: 1rem;
+	}
+
+	.stok-warning-card {
+		width: 100%;
+		max-width: 380px;
+		padding: 1.5rem;
+	}
+
+	.stok-warning-card h2 {
+		margin: 0 0 0.75rem 0;
+		font-size: 1.1rem;
+		color: var(--danger, #c0392b);
+	}
+
+	.stok-warning-card p {
+		margin: 0 0 1.25rem 0;
+		color: var(--text);
+		font-size: 0.92rem;
+		line-height: 1.5;
 	}
 </style>
