@@ -110,6 +110,8 @@
 		{/if}
 
 		<button type="submit" class="primary" disabled={loading}>{loading ? 'Memeriksa...' : 'Masuk'}</button>
+
+		<a href="/database-manager" class="db-manager-link">Database Manager</a>
 	</form>
 	</div>
 </div>
@@ -213,5 +215,13 @@
 
 	button.primary {
 		margin-top: 1.4rem;
+	}
+
+	.db-manager-link {
+		display: block;
+		text-align: center;
+		margin-top: 0.9rem;
+		font-size: 0.75rem;
+		color: var(--text-muted);
 	}
 </style>

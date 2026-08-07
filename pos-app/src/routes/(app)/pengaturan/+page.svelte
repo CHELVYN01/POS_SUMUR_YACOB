@@ -3,6 +3,7 @@
 	import { listUsers, tambahUser, hapusUser, usernameTersedia } from '$lib/db/users';
 	import { currentUser } from '$lib/stores/session';
 	import { tokoInfo } from '$lib/stores/toko';
+	import { setMasterPassword } from '$lib/db-manager';
 	import type { User } from '$lib/types';
 
 	let users = $state<User[]>([]);
@@ -19,9 +20,19 @@
 
 	let isAdmin = $derived($currentUser?.role === 'admin');
 
+	type Tab = 'umum' | 'user' | 'sinkronisasi' | 'keamanan';
+	let tab = $state<Tab>('umum');
+
 	let namaToko = $state($tokoInfo.nama);
 	let alamatToko = $state($tokoInfo.alamat);
 	let tokoTersimpan = $state(false);
+
+	let masterOldPassword = $state('');
+	let masterNewPassword = $state('');
+	let masterNewPasswordUlang = $state('');
+	let masterPasswordError = $state('');
+	let masterPasswordSaving = $state(false);
+	let masterPasswordTersimpan = $state(false);
 
 	onMount(async () => {
 		users = await listUsers();
@@ -81,92 +92,199 @@
 		}
 		users = await listUsers();
 	}
+
+	async function simpanMasterPassword(event: Event) {
+		event.preventDefault();
+		masterPasswordError = '';
+
+		if (!masterOldPassword || !masterNewPassword) {
+			masterPasswordError = 'Semua field wajib diisi';
+			return;
+		}
+		if (masterNewPassword !== masterNewPasswordUlang) {
+			masterPasswordError = 'Konfirmasi password baru tidak cocok';
+			return;
+		}
+
+		masterPasswordSaving = true;
+		try {
+			await setMasterPassword(masterOldPassword, masterNewPassword);
+			masterOldPassword = '';
+			masterNewPassword = '';
+			masterNewPasswordUlang = '';
+			masterPasswordTersimpan = true;
+			setTimeout(() => (masterPasswordTersimpan = false), 2000);
+		} catch (err) {
+			masterPasswordError = String(err);
+		} finally {
+			masterPasswordSaving = false;
+		}
+	}
 </script>
 
 <div class="pengaturan">
 	<h1>Pengaturan</h1>
 
-	{#if isAdmin}
-		<section class="card section">
-			<h2>Info Toko</h2>
-			<form class="toko-form" onsubmit={simpanToko}>
-				<label for="nama-toko">Nama Toko</label>
-				<input id="nama-toko" bind:value={namaToko} placeholder="mis. Kios Sumur Yacob" />
+	<div class="tabs">
+		<button class="tab-btn" class:active={tab === 'umum'} onclick={() => (tab = 'umum')}>
+			Umum
+		</button>
+		<button class="tab-btn" class:active={tab === 'user'} onclick={() => (tab = 'user')}>
+			User
+		</button>
+		<button
+			class="tab-btn"
+			class:active={tab === 'sinkronisasi'}
+			onclick={() => (tab = 'sinkronisasi')}
+		>
+			Sinkronisasi
+		</button>
+		{#if isAdmin}
+			<button
+				class="tab-btn"
+				class:active={tab === 'keamanan'}
+				onclick={() => (tab = 'keamanan')}
+			>
+				Keamanan
+			</button>
+		{/if}
+	</div>
 
-				<label for="alamat-toko">Alamat</label>
-				<input id="alamat-toko" bind:value={alamatToko} placeholder="mis. Jl. Sumur Yacob No. 1" />
+	{#if tab === 'umum'}
+		{#if isAdmin}
+			<section class="card section">
+				<h2>Info Toko</h2>
+				<form class="toko-form" onsubmit={simpanToko}>
+					<label for="nama-toko">Nama Toko</label>
+					<input id="nama-toko" bind:value={namaToko} placeholder="mis. Kios Sumur Yacob" />
+
+					<label for="alamat-toko">Alamat</label>
+					<input id="alamat-toko" bind:value={alamatToko} placeholder="mis. Jl. Sumur Yacob No. 1" />
+
+					<div class="toko-actions">
+						<button type="submit" class="primary">Simpan</button>
+						{#if tokoTersimpan}
+							<span class="saved-hint">Tersimpan</span>
+						{/if}
+					</div>
+				</form>
+			</section>
+		{/if}
+
+		<section class="card section">
+			<h2>Akun Saya</h2>
+			{#if $currentUser}
+				<div class="me">
+					<div class="me-name">{$currentUser.nama}</div>
+					<div class="me-meta">@{$currentUser.username} · {$currentUser.role}</div>
+				</div>
+			{/if}
+		</section>
+	{/if}
+
+	{#if tab === 'user'}
+		<section class="card section">
+			<div class="section-header">
+				<h2>Daftar User</h2>
+				{#if isAdmin}
+					<button onclick={bukaModal}>+ Tambah User</button>
+				{/if}
+			</div>
+
+			{#if listError}
+				<p class="error">{listError}</p>
+			{/if}
+
+			<table>
+				<thead>
+					<tr>
+						<th>Nama</th>
+						<th>Username</th>
+						<th>Role</th>
+						{#if isAdmin}
+							<th></th>
+						{/if}
+					</tr>
+				</thead>
+				<tbody>
+					{#if loading}
+						<tr><td colspan={isAdmin ? 4 : 3} class="empty">Memuat data...</td></tr>
+					{:else}
+						{#each users as user (user.id)}
+							<tr>
+								<td>{user.nama}</td>
+								<td>{user.username}</td>
+								<td class="role">{user.role}</td>
+								{#if isAdmin}
+									<td class="action">
+										<button onclick={() => hapus(user)} disabled={user.id === $currentUser?.id}>
+											Hapus
+										</button>
+									</td>
+								{/if}
+							</tr>
+						{/each}
+					{/if}
+				</tbody>
+			</table>
+		</section>
+	{/if}
+
+	{#if tab === 'sinkronisasi'}
+		<section class="card section">
+			<h2>Sinkronisasi Data</h2>
+			<p class="muted">Backup data ke cloud (Supabase) belum aktif — akan tersedia di fase berikutnya.</p>
+			<button disabled>Sinkronkan Sekarang</button>
+		</section>
+	{/if}
+
+	{#if tab === 'keamanan' && isAdmin}
+		<section class="card section">
+			<h2>Master Password Database Manager</h2>
+			<p class="muted">
+				Password ini melindungi halaman Database Manager (Backup/Restore/Buat Baru) di layar
+				login.
+			</p>
+			<form class="toko-form" onsubmit={simpanMasterPassword}>
+				<label for="master-old">Password Saat Ini</label>
+				<input
+					id="master-old"
+					type="password"
+					bind:value={masterOldPassword}
+					autocomplete="off"
+				/>
+
+				<label for="master-new">Password Baru</label>
+				<input
+					id="master-new"
+					type="password"
+					bind:value={masterNewPassword}
+					autocomplete="new-password"
+				/>
+
+				<label for="master-new-ulang">Ulangi Password Baru</label>
+				<input
+					id="master-new-ulang"
+					type="password"
+					bind:value={masterNewPasswordUlang}
+					autocomplete="new-password"
+				/>
+
+				{#if masterPasswordError}
+					<p class="error">{masterPasswordError}</p>
+				{/if}
 
 				<div class="toko-actions">
-					<button type="submit" class="primary">Simpan</button>
-					{#if tokoTersimpan}
+					<button type="submit" class="primary" disabled={masterPasswordSaving}>
+						{masterPasswordSaving ? 'Menyimpan...' : 'Simpan Password'}
+					</button>
+					{#if masterPasswordTersimpan}
 						<span class="saved-hint">Tersimpan</span>
 					{/if}
 				</div>
 			</form>
 		</section>
 	{/if}
-
-	<section class="card section">
-		<h2>Akun Saya</h2>
-		{#if $currentUser}
-			<div class="me">
-				<div class="me-name">{$currentUser.nama}</div>
-				<div class="me-meta">@{$currentUser.username} · {$currentUser.role}</div>
-			</div>
-		{/if}
-	</section>
-
-	<section class="card section">
-		<div class="section-header">
-			<h2>Daftar User</h2>
-			{#if isAdmin}
-				<button onclick={bukaModal}>+ Tambah User</button>
-			{/if}
-		</div>
-
-		{#if listError}
-			<p class="error">{listError}</p>
-		{/if}
-
-		<table>
-			<thead>
-				<tr>
-					<th>Nama</th>
-					<th>Username</th>
-					<th>Role</th>
-					{#if isAdmin}
-						<th></th>
-					{/if}
-				</tr>
-			</thead>
-			<tbody>
-				{#if loading}
-					<tr><td colspan={isAdmin ? 4 : 3} class="empty">Memuat data...</td></tr>
-				{:else}
-					{#each users as user (user.id)}
-						<tr>
-							<td>{user.nama}</td>
-							<td>{user.username}</td>
-							<td class="role">{user.role}</td>
-							{#if isAdmin}
-								<td class="action">
-									<button onclick={() => hapus(user)} disabled={user.id === $currentUser?.id}>
-										Hapus
-									</button>
-								</td>
-							{/if}
-						</tr>
-					{/each}
-				{/if}
-			</tbody>
-		</table>
-	</section>
-
-	<section class="card section">
-		<h2>Sinkronisasi Data</h2>
-		<p class="muted">Backup data ke cloud (Supabase) belum aktif — akan tersedia di fase berikutnya.</p>
-		<button disabled>Sinkronkan Sekarang</button>
-	</section>
 </div>
 
 <dialog bind:this={dialogEl} onclose={() => (formError = '')}>
@@ -218,6 +336,35 @@
 	.section h2 {
 		font-size: 1rem;
 		margin-bottom: 0.9rem;
+	}
+
+	.tabs {
+		display: flex;
+		gap: 0.4rem;
+		margin-bottom: 1.25rem;
+		border-bottom: 1px solid var(--border);
+	}
+
+	.tab-btn {
+		border: none;
+		border-radius: 0;
+		background: transparent;
+		padding: 0.6em 1em;
+		font-size: 0.9rem;
+		color: var(--text-muted);
+		border-bottom: 2px solid transparent;
+		margin-bottom: -1px;
+	}
+
+	.tab-btn:hover {
+		background: transparent;
+		color: var(--text);
+	}
+
+	.tab-btn.active {
+		color: var(--accent);
+		border-bottom-color: var(--accent);
+		font-weight: 600;
 	}
 
 	.section-header {
