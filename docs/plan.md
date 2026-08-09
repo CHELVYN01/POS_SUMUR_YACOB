@@ -193,6 +193,8 @@ plan fix 3 ✅
 plan fix 4 ✅
 - pak saya ingin multi kerang ini akan ke hapus pada saat dia di bayar selesai klo misalnya kita di penjualan, terus tiba tiba kita ke product lalu kembali ke penjalan datanya tidak tersimpan nih termasuk keranjan kembali 1 nah ini jadi probleh dong
 
+plan fix 5 
+the probleh install di windows 7 ini 
 
 
 
