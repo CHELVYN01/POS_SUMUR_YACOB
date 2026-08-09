@@ -20,4 +20,4 @@ Format: `tanggal pengerjaan - nama feat - git commit`
 - 2026-08-08 - fase 14: warning popup stok habis saat bayar di kasir, stok otomatis berkurang setelah pembayaran, rename label Jual Barang/Input Barang jadi Penjualan/Produk - 2b66e19
 - 2026-08-08 - fase 15: auto-backup mingguan (cek tiap app dibuka, retensi 4 file terbaru), lokasi folder bisa dipilih admin di Pengaturan > Sinkronisasi dengan fallback ke Documents/POS-Backup - eb013e2
 - 2026-08-08 - fase 16: multi-keranjang di Penjualan (tab keranjang, max 5, tutup otomatis setelah bayar), state dipindah ke module store supaya tidak hilang saat pindah halaman - 7a712a6
-- 2026-08-09 - fix 5: installer Windows embed WebView2 bootstrapper (webviewInstallMode: embedBootstrapper) supaya tidak gagal saat tidak ada internet/TLS lawas, untuk kompatibilitas Windows 7 - PENDING_HASH
+- 2026-08-09 - fix 5: installer Windows embed WebView2 bootstrapper (webviewInstallMode: embedBootstrapper) supaya tidak gagal saat tidak ada internet/TLS lawas, untuk kompatibilitas Windows 7 - 7cd3879
