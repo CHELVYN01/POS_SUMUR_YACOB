@@ -64,6 +64,18 @@ jobs:
         run: npm run check
         continue-on-error: true
 
+      # Tanggal & commit build disuntikkan ke app (tampil di layar login dan di
+      # Pengaturan > Umum). Tanpa ini, "installer yang terpasang versi mana?" cuma
+      # bisa ditebak — dan menebak sudah pernah menghabiskan waktu sehari penuh.
+      - name: Siapkan info build
+        shell: pwsh
+        run: |
+          $tanggal = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm 'UTC'")
+          $commit = "$env:GITHUB_SHA".Substring(0, 7)
+          "VITE_BUILD_DATE=$tanggal" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VITE_BUILD_COMMIT=$commit" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Build $tanggal - $commit"
+
       # `tauri build` otomatis menjalankan `npm run build` (vite) lebih dulu,
       # sesuai beforeBuildCommand di tauri.conf.json.
       #

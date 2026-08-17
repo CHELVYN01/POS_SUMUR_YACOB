@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { login as loginQuery } from '$lib/db/users';
 	import { currentUser } from '$lib/stores/session';
+	import { BUILD_LABEL } from '$lib/buildInfo';
 
 	const STORAGE_KEY = 'pos-remember-login';
 
@@ -46,6 +47,12 @@
 
 			currentUser.set(user);
 			goto('/kasir');
+		} catch (e) {
+			// Tanpa catch ini, kegagalan membuka database (mis. migration ditolak) tidak
+			// menampilkan apa pun: tombol cuma kembali ke "Masuk" dan layar diam, sehingga
+			// tidak bisa dibedakan dari password salah.
+			console.error('Login gagal:', e);
+			error = `Gagal membuka database: ${e instanceof Error ? e.message : String(e)}`;
 		} finally {
 			loading = false;
 		}
@@ -112,6 +119,8 @@
 		<button type="submit" class="primary" disabled={loading}>{loading ? 'Memeriksa...' : 'Masuk'}</button>
 
 		<a href="/database-manager" class="db-manager-link">Database Manager</a>
+
+		<p class="build-info">{BUILD_LABEL}</p>
 	</form>
 	</div>
 </div>
@@ -223,5 +232,13 @@
 		margin-top: 0.9rem;
 		font-size: 0.75rem;
 		color: var(--text-muted);
+	}
+
+	.build-info {
+		margin: 0.5rem 0 0;
+		text-align: center;
+		font-size: 0.7rem;
+		color: var(--text-muted);
+		opacity: 0.75;
 	}
 </style>
