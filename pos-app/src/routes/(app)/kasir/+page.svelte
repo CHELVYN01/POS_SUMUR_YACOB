@@ -5,18 +5,26 @@
 	import { currentUser } from '$lib/stores/session';
 	import { tandaiScan } from '$lib/stores/scanStatus';
 	import { keranjangState, nextKeranjangIdAndIncrement } from '$lib/stores/keranjang.svelte';
-	import type { Barang } from '$lib/types';
+	import { manualSaja } from '$lib/scanner';
+	import type { Barang, ItemPenjualan } from '$lib/types';
 
 	type LogEntry = { waktu: string; pesan: string };
+	type Struk = {
+		nomor: string;
+		waktu: string;
+		items: ItemPenjualan[];
+		total: number;
+		tunai: number;
+		kembalian: number;
+	};
 
 	let cari = $state('');
 	let scan = $state('');
 	let daftarBarang = $state<Barang[]>([]);
 	let membayar = $state(false);
 	let showInvoice = $state(false);
-	let sudahBayar = $state(false);
 	let uangDibayar = $state('');
-	let ringkasanBayar = $state<{ total: number; kembalian: number } | null>(null);
+	let struk = $state<Struk | null>(null);
 	let showStokHabis = $state(false);
 	let log = $state<LogEntry[]>([]);
 	let scanInput = $state<HTMLInputElement | null>(null);
@@ -112,11 +120,13 @@
 		const id = nextKeranjangIdAndIncrement();
 		keranjangState.list.push({ id, nama: `Keranjang ${id}`, cart: [] });
 		keranjangState.activeId = id;
+		uangDibayar = '';
 	}
 
 	function tutupKeranjang(id: number) {
 		if (showInvoice) return;
 		keranjangState.list = keranjangState.list.filter((k) => k.id !== id);
+		uangDibayar = '';
 		if (keranjangState.list.length === 0) {
 			const newId = nextKeranjangIdAndIncrement();
 			keranjangState.list.push({ id: newId, nama: `Keranjang ${newId}`, cart: [] });
@@ -129,20 +139,20 @@
 	function pindahKeranjang(id: number) {
 		if (showInvoice) return;
 		keranjangState.activeId = id;
+		uangDibayar = '';
 	}
 
 	function formatRupiah(n: number) {
 		return 'Rp' + n.toLocaleString('id-ID');
 	}
 
-	async function submitScan(event: Event) {
-		event.preventDefault();
-		const kode = scan.trim();
-		if (!kode) return;
+	async function prosesKode(kode: string) {
+		const kunci = kode.trim();
+		if (!kunci) return;
 
-		let barang = await cariBarangByBarcode(kode);
+		let barang = await cariBarangByBarcode(kunci);
 		if (!barang) {
-			barang = daftarBarang.find((b) => b.nama.toLowerCase() === kode.toLowerCase()) ?? null;
+			barang = daftarBarang.find((b) => b.nama.toLowerCase() === kunci.toLowerCase()) ?? null;
 		}
 		if (barang) {
 			tambah(barang);
@@ -151,26 +161,46 @@
 		scan = '';
 	}
 
-	function bukaInvoice() {
-		uangDibayar = '';
-		sudahBayar = false;
-		ringkasanBayar = null;
-		showInvoice = true;
-		setTimeout(() => uangInput?.focus(), 50);
+	async function submitScan(event: Event) {
+		event.preventDefault();
+		await prosesKode(scan);
 	}
 
+	/** scanner nembak ke kolom lain — tarik balik ke kolom scan */
+	function alihkanScan(kode: string) {
+		if (showInvoice) return;
+		scanInput?.focus();
+		prosesKode(kode);
+	}
+
+	/** tutup struk — transaksi sudah tersimpan, keranjangnya ikut ditutup */
 	function tutupInvoice() {
-		const idSelesaiBayar = sudahBayar ? keranjangState.activeId : null;
+		if (!showInvoice) return;
+		const idSelesaiBayar = keranjangState.activeId;
 		showInvoice = false;
-		sudahBayar = false;
-		uangDibayar = '';
-		ringkasanBayar = null;
-		if (idSelesaiBayar !== null) tutupKeranjang(idSelesaiBayar);
+		struk = null;
+		tutupKeranjang(idSelesaiBayar);
+	}
+
+	/** struk ditutup dari keyboard di mana pun fokusnya berada */
+	function strukKeydown(event: KeyboardEvent) {
+		if (!showInvoice) return;
+		if (event.key !== 'Escape' && event.key !== 'Enter') return;
+		event.preventDefault();
+		tutupInvoice();
 	}
 
 	function uangPas() {
 		uangDibayar = String(total);
 		uangInput?.focus();
+	}
+
+	function uangKeydown(event: KeyboardEvent) {
+		// Enter dari scanner sudah ditangani manualSaja (defaultPrevented)
+		if (event.key !== 'Enter' || event.defaultPrevented) return;
+		event.preventDefault();
+		if (membayar || cart.length === 0 || !bayarValid) return;
+		klikBayar();
 	}
 
 	function klikBayar() {
@@ -191,22 +221,42 @@
 		membayar = true;
 		try {
 			const totalBayar = total;
+			const tunai = uangDibayarNum;
 			const kembalianAkhir = kembalian;
 			const namaKeranjang = activeKeranjang.nama;
-			await simpanPenjualan($currentUser.id, cart);
+			const items = cart.map((item) => ({ ...item }));
+
+			const penjualanId = await simpanPenjualan($currentUser.id, cart);
 			await kurangiStokBarang(cart.map((item) => ({ barangId: item.barangId, jumlah: item.jumlah })));
 			daftarBarang = await listBarang();
 			catatLog(
 				`[${namaKeranjang}] Bayar — total ${formatRupiah(totalBayar)}, kembalian ${formatRupiah(kembalianAkhir)}`
 			);
+
 			activeKeranjang.cart = [];
-			ringkasanBayar = { total: totalBayar, kembalian: kembalianAkhir };
-			sudahBayar = true;
+			uangDibayar = '';
+			struk = {
+				nomor: String(penjualanId).padStart(4, '0'),
+				waktu: new Date().toLocaleString('id-ID', {
+					day: '2-digit',
+					month: '2-digit',
+					year: 'numeric',
+					hour: '2-digit',
+					minute: '2-digit'
+				}),
+				items,
+				total: totalBayar,
+				tunai,
+				kembalian: kembalianAkhir
+			};
+			showInvoice = true;
 		} finally {
 			membayar = false;
 		}
 	}
 </script>
+
+<svelte:window onkeydown={strukKeydown} />
 
 <div class="kasir">
 	<section class="panel cart card">
@@ -290,15 +340,59 @@
 		</div>
 
 		<div class="cart-footer">
-			<div class="total-row">
-				<span>Total</span>
-				<span class="total-amount">{formatRupiah(total)}</span>
+			<div class="bayar-panel">
+				<div class="total-row">
+					<span>Total</span>
+					<span class="total-amount">{formatRupiah(total)}</span>
+				</div>
+
+				<div class="panel-sep"></div>
+
+				<div class="bayar-input-row">
+					<label for="uang-dibayar">Uang Dibayar</label>
+					<div class="uang-input-wrap">
+						<button
+							type="button"
+							class="chip"
+							onclick={uangPas}
+							disabled={membayar || cart.length === 0}
+						>
+							Uang Pas
+						</button>
+						<input
+							id="uang-dibayar"
+							type="number"
+							min="0"
+							step="500"
+							bind:value={uangDibayar}
+							bind:this={uangInput}
+							placeholder="0"
+							disabled={membayar}
+							onkeydown={uangKeydown}
+							use:manualSaja={alihkanScan}
+						/>
+					</div>
+				</div>
+
+				<div class="panel-sep"></div>
+
+				<div class="kembalian-row" class:kurang={!bayarValid && uangDibayarNum > 0}>
+					<span>Kembalian</span>
+					<span>{formatRupiah(Math.max(kembalian, 0))}</span>
+				</div>
+				{#if uangDibayarNum > 0 && !bayarValid}
+					<p class="kurang-msg">Uang belum cukup — kurang {formatRupiah(total - uangDibayarNum)}</p>
+				{/if}
 			</div>
 
 			<div class="cart-actions">
 				<button onclick={bersihkan} disabled={membayar}>Kosongkan</button>
-				<button class="primary" onclick={bukaInvoice} disabled={membayar || cart.length === 0}>
-					Bayar
+				<button
+					class="primary"
+					onclick={klikBayar}
+					disabled={membayar || cart.length === 0 || !bayarValid}
+				>
+					{membayar ? 'Menyimpan...' : 'Bayar'}
 				</button>
 			</div>
 		</div>
@@ -307,7 +401,7 @@
 	<div class="side-col">
 		<section class="panel list-panel card">
 			<h1>Daftar Produk</h1>
-			<input class="search" placeholder="Cari produk..." bind:value={cari} />
+			<input class="search" placeholder="Cari produk..." bind:value={cari} use:manualSaja={alihkanScan} />
 
 			<div class="list-table-wrap">
 				<table>
@@ -354,79 +448,47 @@
 	</div>
 </div>
 
-{#if showInvoice}
+{#if showInvoice && struk}
 	<div
 		class="invoice-overlay"
 		role="presentation"
-		onclick={() => !membayar && !sudahBayar && tutupInvoice()}
-		onkeydown={(e) => e.key === 'Escape' && !membayar && !sudahBayar && tutupInvoice()}
+		onclick={(e) => e.target === e.currentTarget && tutupInvoice()}
 	>
-		<div class="invoice-card card" onclick={(e) => e.stopPropagation()}>
-			<h2>Invoice</h2>
+		<div class="invoice-card card" role="dialog" aria-modal="true" aria-label="Invoice">
+			<div class="invoice-head">
+				<h2>Invoice</h2>
+				<span class="invoice-meta">#{struk.nomor} · {struk.waktu}</span>
+			</div>
 
-			{#if !sudahBayar}
-				<div class="invoice-items">
-					{#each cart as item (item.barangId)}
-						<div class="invoice-row">
-							<span class="invoice-nama"
-								>{item.nama} <span class="invoice-jml">x{item.jumlah}</span></span
-							>
-							<span>{formatRupiah(item.harga * item.jumlah)}</span>
-						</div>
-					{/each}
-				</div>
-
-				<div class="invoice-total">
-					<span>Total</span>
-					<span>{formatRupiah(total)}</span>
-				</div>
-
-				<div class="bayar-input-row">
-					<label for="uang-dibayar">Uang Dibayar</label>
-					<div class="uang-input-wrap">
-						<input
-							id="uang-dibayar"
-							type="number"
-							min="0"
-							step="500"
-							bind:value={uangDibayar}
-							bind:this={uangInput}
-							placeholder="0"
-							disabled={membayar}
-						/>
-						<button type="button" onclick={uangPas} disabled={membayar}>Uang Pas</button>
+			<div class="invoice-items">
+				{#each struk.items as item (item.barangId)}
+					<div class="invoice-row">
+						<span class="invoice-nama"
+							>{item.nama} <span class="invoice-jml">x{item.jumlah}</span></span
+						>
+						<span>{formatRupiah(item.harga * item.jumlah)}</span>
 					</div>
-				</div>
+				{/each}
+			</div>
 
-				<div class="invoice-total kembalian" class:kurang={!bayarValid && uangDibayarNum > 0}>
-					<span>Kembalian</span>
-					<span>{formatRupiah(Math.max(kembalian, 0))}</span>
-				</div>
-				{#if uangDibayarNum > 0 && !bayarValid}
-					<p class="kurang-msg">Uang belum cukup — kurang {formatRupiah(total - uangDibayarNum)}</p>
-				{/if}
+			<div class="invoice-total">
+				<span>Total</span>
+				<span>{formatRupiah(struk.total)}</span>
+			</div>
 
-				<div class="invoice-actions">
-					<button onclick={tutupInvoice} disabled={membayar}>Batal</button>
-					<button class="primary" onclick={klikBayar} disabled={membayar || !bayarValid}>
-						{membayar ? 'Menyimpan...' : 'Konfirmasi Bayar'}
-					</button>
-				</div>
-			{:else if ringkasanBayar}
-				<div class="invoice-total">
-					<span>Total</span>
-					<span>{formatRupiah(ringkasanBayar.total)}</span>
-				</div>
+			<div class="invoice-sub">
+				<span>Tunai</span>
+				<span>{formatRupiah(struk.tunai)}</span>
+			</div>
 
-				<div class="invoice-total kembalian">
-					<span>Kembalian</span>
-					<span>{formatRupiah(ringkasanBayar.kembalian)}</span>
-				</div>
+			<div class="invoice-total kembalian">
+				<span>Kembalian</span>
+				<span>{formatRupiah(struk.kembalian)}</span>
+			</div>
 
-				<div class="invoice-actions">
-					<button class="primary" onclick={tutupInvoice}>Selesai</button>
-				</div>
-			{/if}
+			<div class="invoice-actions">
+				<button class="primary" onclick={tutupInvoice}>Selesai</button>
+			</div>
 		</div>
 	</div>
 {/if}
@@ -567,24 +629,86 @@
 		padding-top: 0.9rem;
 	}
 
+	/* panel ringkasan bayar — nempel kanan, label & nominal dua kolom rata kanan */
+	.bayar-panel {
+		margin-left: auto;
+		width: min(290px, 100%);
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		align-items: center;
+		justify-items: end;
+		column-gap: 0.75rem;
+		row-gap: 0.45rem;
+		background: transparent;
+		border: none;
+		padding: 0.2rem 0.25rem 0 0.25rem;
+	}
+
+	.panel-sep {
+		grid-column: 1 / -1;
+		width: 100%;
+		height: 1px;
+		background: var(--border);
+	}
+
+	/* display:contents — barisnya lebur jadi sel grid, tapi style tetap diwarisi */
 	.total-row {
-		display: flex;
-		justify-content: space-between;
+		display: contents;
 		font-weight: 600;
-		padding: 0 0.25rem;
-		font-size: 1.3rem;
+		font-size: 1.05rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* label rata kiri, nominal rata kanan */
+	.total-row > span:first-child,
+	.kembalian-row > span:first-child,
+	.bayar-input-row > label {
+		justify-self: start;
+	}
+
+	/* disamakan dengan inset teks di dalam input (border 1px + padding 0.6rem) */
+	.total-amount,
+	.kembalian-row span:last-child {
+		padding-right: 0.65rem;
+	}
+
+	.kembalian-row {
+		display: contents;
+		font-weight: 600;
+		font-size: 0.95rem;
+		color: var(--accent);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.kembalian-row.kurang {
+		color: var(--danger);
+	}
+
+	.kembalian-row.kurang {
+		color: var(--danger, #c0392b);
 	}
 
 	.cart-actions {
 		display: flex;
 		gap: 0.6rem;
-		margin-top: 1rem;
+		margin-top: 0.9rem;
 	}
 
 	.cart-actions button {
 		flex: 1;
-		padding: 0.75em 1em;
-		font-size: 1rem;
+		padding: 0.6em 1em;
+		font-size: 0.9rem;
+	}
+
+	/* tombol utama dibikin dominan */
+	.cart-actions button.primary {
+		flex: 2;
+		font-weight: 600;
+	}
+
+	.cart-actions button:disabled {
+		opacity: 0.55;
+		cursor: default;
 	}
 
 	.list-panel {
@@ -668,9 +792,31 @@
 		padding: 1.5rem;
 	}
 
+	.invoice-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-bottom: 1rem;
+	}
+
 	.invoice-card h2 {
-		margin: 0 0 1rem 0;
+		margin: 0;
 		font-size: 1.1rem;
+	}
+
+	.invoice-meta {
+		font-size: 0.78rem;
+		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.invoice-sub {
+		display: flex;
+		justify-content: space-between;
+		font-size: 0.95rem;
+		color: var(--text-muted);
+		padding-bottom: 0.3rem;
 	}
 
 	.invoice-items {
@@ -711,44 +857,66 @@
 		color: var(--accent, #2f8a4e);
 	}
 
-	.invoice-total.kembalian.kurang {
-		color: var(--danger, #c0392b);
-	}
-
 	.bayar-input-row {
-		padding-top: 0.9rem;
-		border-top: 1px solid var(--border);
-		display: flex;
-		flex-direction: column;
-		gap: 0.4rem;
+		display: contents;
 	}
 
 	.bayar-input-row label {
-		font-size: 0.85rem;
+		font-size: 0.82rem;
 		color: var(--text-muted);
 	}
 
+	/* tombol ditaruh sebelum input supaya angka input lurus dengan Total & Kembalian */
 	.uang-input-wrap {
 		display: flex;
-		gap: 0.5rem;
+		align-items: center;
+		gap: 0.4rem;
+		width: 100%;
 	}
 
 	.uang-input-wrap input {
 		flex: 1;
-		font-size: 1.1rem;
-		padding: 0.6em 0.8em;
+		min-width: 0;
+		font-size: 0.95rem;
+		padding: 0.4em 0.6rem;
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+		/* panah spinner bikin angka nggak lurus dengan Total & Kembalian */
+		appearance: textfield;
+		-moz-appearance: textfield;
 	}
 
-	.uang-input-wrap button {
+	.uang-input-wrap input::-webkit-outer-spin-button,
+	.uang-input-wrap input::-webkit-inner-spin-button {
+		-webkit-appearance: none;
+		margin: 0;
+	}
+
+	.uang-input-wrap button.chip {
 		flex-shrink: 0;
-		padding: 0 0.9em;
-		font-size: 0.85rem;
+		padding: 0.35em 0.6em;
+		font-size: 0.72rem;
+		color: var(--text-muted);
+		background: transparent;
+	}
+
+	.uang-input-wrap button.chip:hover:not(:disabled) {
+		background: var(--bg);
+		color: var(--text);
+	}
+
+	.uang-input-wrap button.chip:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 
 	.kurang-msg {
-		color: var(--danger, #c0392b);
-		font-size: 0.82rem;
-		margin: -0.4rem 0 0.4rem 0;
+		grid-column: 1 / -1;
+		color: var(--danger);
+		font-size: 0.75rem;
+		text-align: right;
+		padding-right: 0.65rem;
+		margin: -0.2rem 0 0 0;
 	}
 
 	.invoice-actions {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { listBarang, tambahBarang, updateBarang, hapusBarang } from '$lib/db/barang';
+	import { manualSaja } from '$lib/scanner';
 	import type { Barang } from '$lib/types';
 
 	type LogEntry = { waktu: string; pesan: string };
@@ -82,20 +83,30 @@
 		return perubahan.length > 0 ? ` (${perubahan.join(', ')})` : ' (tidak ada perubahan)';
 	}
 
-	function scanBarcode(event: KeyboardEvent) {
-		// scanner USB berperilaku seperti keyboard: ketik cepat lalu tekan Enter
-		if (event.key !== 'Enter') return;
-		event.preventDefault();
+	function terapkanBarcode(kode: string) {
+		const kunci = kode.trim();
+		if (!kunci) return;
 
-		const kode = barcode.trim();
-		if (!kode) return;
+		barcode = kunci;
 
-		const existing = barangList.find((b) => b.barcode === kode);
+		const existing = barangList.find((b) => b.barcode === kunci);
 		if (existing) {
 			edit(existing);
 		}
 
 		namaInput?.focus();
+	}
+
+	function scanBarcode(event: KeyboardEvent) {
+		// scanner USB berperilaku seperti keyboard: ketik cepat lalu tekan Enter
+		if (event.key !== 'Enter') return;
+		event.preventDefault();
+		terapkanBarcode(barcode);
+	}
+
+	/** scanner nembak ke kolom lain — barcode tetap masuk ke kolom barcode */
+	function alihkanScan(kode: string) {
+		terapkanBarcode(kode);
 	}
 
 	async function simpan(event: Event) {
@@ -186,13 +197,33 @@
 				/>
 
 				<label for="nama">Nama Produk</label>
-				<input id="nama" bind:value={nama} bind:this={namaInput} placeholder="mis. Beras 5kg" />
+				<input
+					id="nama"
+					bind:value={nama}
+					bind:this={namaInput}
+					placeholder="mis. Beras 5kg"
+					use:manualSaja={alihkanScan}
+				/>
 
 				<label for="harga">Harga (Rp) <span class="opt required">(wajib)</span></label>
-				<input id="harga" type="number" min="0" bind:value={harga} placeholder="mis. 65000" />
+				<input
+					id="harga"
+					type="number"
+					min="0"
+					bind:value={harga}
+					placeholder="mis. 65000"
+					use:manualSaja={alihkanScan}
+				/>
 
 				<label for="qty">Stok / Qty <span class="opt">(opsional)</span></label>
-				<input id="qty" type="number" min="0" bind:value={qty} placeholder="kosongkan jika tidak dihitung" />
+				<input
+					id="qty"
+					type="number"
+					min="0"
+					bind:value={qty}
+					placeholder="kosongkan jika tidak dihitung"
+					use:manualSaja={alihkanScan}
+				/>
 
 				{#if formError}
 					<p class="error">{formError}</p>
