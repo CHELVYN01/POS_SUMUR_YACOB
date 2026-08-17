@@ -85,6 +85,13 @@
 		catatLog(`[${activeKeranjang.nama}] Tambah ${barang.nama} x1`);
 	}
 
+	/** baris daftar produk berperan sebagai tombol, jadi Enter/Spasi harus ikut menambah */
+	function barisKeydown(event: KeyboardEvent, barang: Barang) {
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		tambah(barang);
+	}
+
 	function tambahJumlah(barangId: number) {
 		const existing = activeKeranjang.cart.find((c) => c.barangId === barangId);
 		if (existing) {
@@ -409,21 +416,24 @@
 						<tr>
 							<th>Nama Produk</th>
 							<th>Harga</th>
-							<th></th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each barangFiltered as barang (barang.id)}
-							<tr>
+							<tr
+								class="row-tambah"
+								role="button"
+								tabindex="0"
+								aria-label="Tambah {barang.nama} ke keranjang"
+								onclick={() => tambah(barang)}
+								onkeydown={(e) => barisKeydown(e, barang)}
+							>
 								<td>{barang.nama}</td>
 								<td>{formatRupiah(barang.harga)}</td>
-								<td class="action">
-									<button onclick={() => tambah(barang)}>+</button>
-								</td>
 							</tr>
 						{/each}
 						{#if barangFiltered.length === 0}
-							<tr><td colspan="3" class="empty">Produk tidak ditemukan</td></tr>
+							<tr><td colspan="2" class="empty">Produk tidak ditemukan</td></tr>
 						{/if}
 					</tbody>
 				</table>
@@ -731,6 +741,23 @@
 	.list-table-wrap {
 		flex: 1;
 		overflow-y: auto;
+	}
+
+	.row-tambah {
+		cursor: pointer;
+		/* klik cepat berturut-turut jangan menyeleksi teks barisnya */
+		user-select: none;
+	}
+
+	.row-tambah:hover,
+	.row-tambah:focus-visible {
+		background: var(--bg);
+		outline: none;
+	}
+
+	.row-tambah:active {
+		/* umpan balik singkat bahwa kliknya masuk — barisnya tidak berubah tampak lain */
+		opacity: 0.65;
 	}
 
 	.log-panel {

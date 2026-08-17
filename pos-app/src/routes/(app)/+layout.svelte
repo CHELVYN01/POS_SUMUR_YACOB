@@ -146,7 +146,11 @@
 <style>
 	.shell {
 		display: flex;
-		min-height: 100vh;
+		/* Tinggi dikunci setinggi layar supaya yang menggulung hanya .content.
+		   Sebelumnya seluruh halaman yang menggulung, sehingga panel sticky di dalam
+		   halaman (mis. form Tambah Produk) ikut naik keluar layar — sticky-nya
+		   menempel ke .content yang tidak pernah menggulung. */
+		height: 100vh;
 	}
 
 	.sidebar {
@@ -288,6 +292,7 @@
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
+		min-height: 0;
 	}
 
 	.navbar {
@@ -351,6 +356,7 @@
 		flex: 1;
 		padding: 2rem;
 		max-width: 100%;
-		overflow-x: auto;
+		min-height: 0;
+		overflow: auto;
 	}
 </style>

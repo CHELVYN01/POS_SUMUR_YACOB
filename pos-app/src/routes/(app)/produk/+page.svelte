@@ -15,6 +15,16 @@
 
 	let barangList = $state<Barang[]>([]);
 	let loading = $state(true);
+	let cari = $state('');
+
+	let barangTampil = $derived.by(() => {
+		const kunci = cari.trim().toLowerCase();
+		if (!kunci) return barangList;
+		return barangList.filter(
+			(b) =>
+				b.nama.toLowerCase().includes(kunci) || (b.barcode ?? '').toLowerCase().includes(kunci)
+		);
+	});
 
 	let barcode = $state('');
 	let nama = $state('');
@@ -23,8 +33,19 @@
 	let editId = $state<number | null>(null);
 	let editSebelum = $state<Barang | null>(null);
 
+	/**
+	 * Barcode yang sudah "dipegang" form. Selama masih terisi, scan berikutnya ditolak —
+	 * satu scan harus diselesaikan (isi nama & harga lalu Simpan) sebelum scan berikutnya.
+	 * Tanpa ini kasir bisa scan beruntun, dan yang tersimpan cuma barcode terakhir.
+	 *
+	 * Tidak bisa disimpulkan dari `barcode` saja: saat scan pertama, karakter dari scanner
+	 * sudah masuk ke kolom barcode sebelum Enter — kolomnya terisi padahal belum diterapkan.
+	 */
+	let barcodeTerkunci = $state<string | null>(null);
+
 	let barcodeInput = $state<HTMLInputElement | null>(null);
 	let namaInput = $state<HTMLInputElement | null>(null);
+	let hargaInput = $state<HTMLInputElement | null>(null);
 
 	let log = $state<LogEntry[]>([]);
 	let formError = $state('');
@@ -94,20 +115,44 @@
 		const kunci = kode.trim();
 		if (!kunci) return;
 
+		if (barcodeTerkunci !== null) {
+			tolakScan();
+			return;
+		}
+
 		const existing = barangList.find((b) => b.barcode === kunci);
 
 		if (existing) {
 			edit(existing);
 			toast.info(`Barcode sudah ada — "${existing.nama}" dimuat untuk diedit`);
-		} else if (editId !== null) {
-			// Barcode baru di-scan sementara form masih mengedit produk lain. Tanpa reset,
-			// nama/harga produk lama tetap tertinggal di form dan editId masih menunjuk ke
-			// produk itu — menyimpannya justru menimpa produk lama dengan barcode baru ini.
-			resetForm();
 		}
 
+		// Kalau editId masih terisi di sini, itu produk lama yang belum punya barcode dan
+		// sengaja dibuka untuk diberi barcode lewat scan — jangan di-reset. Kasus "scan
+		// nyasar ke produk lain" yang dulu ditangani di sini sudah tidak mungkin terjadi:
+		// produk yang sudah punya barcode mengunci kolomnya.
 		barcode = kunci;
+		barcodeTerkunci = kunci;
 		namaInput?.focus();
+	}
+
+	/**
+	 * Scan datang padahal form masih memegang barcode lain. Fokus diarahkan ke kolom
+	 * yang memang masih kurang, supaya jelas apa yang harus dikerjakan dulu.
+	 */
+	function tolakScan() {
+		toast.error(
+			`Selesaikan dulu barcode ${barcodeTerkunci} — isi Nama & Harga lalu Simpan, atau tekan Ganti`
+		);
+		if (!nama.trim()) namaInput?.focus();
+		else if (harga === undefined) hargaInput?.focus();
+	}
+
+	/** melepas kunci supaya kolom barcode bisa di-scan / diketik ulang */
+	function gantiBarcode() {
+		barcodeTerkunci = null;
+		barcode = '';
+		barcodeInput?.focus();
 	}
 
 	function scanBarcode(event: KeyboardEvent) {
@@ -115,6 +160,19 @@
 		if (event.key !== 'Enter') return;
 		event.preventDefault();
 		terapkanBarcode(barcode);
+	}
+
+	/**
+	 * Enter di dalam form tidak boleh menyimpan. Scanner mengakhiri barcode dengan Enter;
+	 * kalau tembakannya nyasar ke Nama/Harga/Stok dan tidak terdeteksi sebagai scan,
+	 * Enter-nya jadi "implicit submit" — produk tersimpan diam-diam dengan barcode
+	 * nempel di nama. Menyimpan hanya lewat tombol.
+	 */
+	function tahanEnter(event: KeyboardEvent) {
+		if (event.key !== 'Enter') return;
+		const target = event.target as HTMLElement | null;
+		if (target?.tagName === 'BUTTON') return;
+		event.preventDefault();
 	}
 
 	/** scanner nembak ke kolom lain — barcode tetap masuk ke kolom barcode */
@@ -185,6 +243,8 @@
 		editId = barang.id;
 		editSebelum = barang;
 		barcode = barang.barcode ?? '';
+		// produk lama yang belum punya barcode tetap boleh di-scan untuk diisi
+		barcodeTerkunci = barang.barcode ?? null;
 		nama = barang.nama;
 		harga = barang.harga;
 		qty = barang.qty ?? undefined;
@@ -212,6 +272,7 @@
 		editId = null;
 		editSebelum = null;
 		barcode = '';
+		barcodeTerkunci = null;
 		nama = '';
 		harga = undefined;
 		qty = undefined;
@@ -223,18 +284,32 @@
 	<div class="side-col">
 		<section class="card form-panel">
 			<h2>{editId !== null ? 'Edit Produk' : 'Tambah Produk'}</h2>
-			<form onsubmit={simpan}>
-				<label for="barcode">Barcode <span class="opt required">(wajib, scan atau ketik manual)</span></label>
-				<input
-					id="barcode"
-					bind:value={barcode}
-					bind:this={barcodeInput}
-					onkeydown={scanBarcode}
-					placeholder="Scan barcode di sini..."
-					autofocus
-				/>
+			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+			<form onsubmit={simpan} onkeydown={tahanEnter}>
+				<label for="barcode">
+					Barcode
+					{#if barcodeTerkunci !== null}
+						<span class="opt terkunci">(terkunci sampai produk ini disimpan)</span>
+					{:else}
+						<span class="opt required">(wajib, scan atau ketik manual)</span>
+					{/if}
+				</label>
+				<div class="barcode-row">
+					<input
+						id="barcode"
+						bind:value={barcode}
+						bind:this={barcodeInput}
+						onkeydown={scanBarcode}
+						readonly={barcodeTerkunci !== null}
+						placeholder="Scan barcode di sini..."
+						autofocus
+					/>
+					{#if barcodeTerkunci !== null}
+						<button type="button" class="ganti" onclick={gantiBarcode}>Ganti</button>
+					{/if}
+				</div>
 
-				<label for="nama">Nama Produk</label>
+				<label for="nama">Nama Produk <span class="opt required">(wajib)</span></label>
 				<input
 					id="nama"
 					bind:value={nama}
@@ -249,6 +324,7 @@
 					type="number"
 					min="0"
 					bind:value={harga}
+					bind:this={hargaInput}
 					placeholder="mis. 65000"
 					use:manualSaja={alihkanScan}
 				/>
@@ -294,7 +370,17 @@
 	</div>
 
 	<section class="list-panel">
-		<h1>Daftar Produk</h1>
+		<div class="list-head">
+			<h1>Daftar Produk</h1>
+			<span class="jumlah">{barangTampil.length} produk</span>
+		</div>
+		<input
+			class="search"
+			placeholder="Cari nama produk atau barcode..."
+			bind:value={cari}
+			use:manualSaja={alihkanScan}
+		/>
+
 		<table>
 			<thead>
 				<tr>
@@ -308,8 +394,14 @@
 			<tbody>
 				{#if loading}
 					<tr><td colspan="5" class="empty">Memuat data...</td></tr>
+				{:else if barangTampil.length === 0}
+					<tr>
+						<td colspan="5" class="empty">
+							{cari.trim() ? `Tidak ada produk cocok dengan "${cari.trim()}"` : 'Belum ada produk'}
+						</td>
+					</tr>
 				{:else}
-					{#each barangList as barang (barang.id)}
+					{#each barangTampil as barang (barang.id)}
 						<tr>
 							<td>{barang.nama}</td>
 							<td class="mono">{barang.barcode ?? '-'}</td>
@@ -340,11 +432,16 @@
 		flex-direction: column;
 		gap: 1.5rem;
 		position: sticky;
-		top: 1rem;
+		top: 0;
+		/* Kalau kolom ini lebih tinggi dari layar, sticky tidak menolong: bagian atasnya
+		   (form Tambah Produk) tetap tergulung keluar. Tingginya dibatasi setinggi area
+		   konten — 56px navbar + 2rem sisa padding — dan log yang menyusut. */
+		max-height: calc(100vh - 56px - 2rem);
 	}
 
 	.form-panel {
 		padding: 1.25rem;
+		flex-shrink: 0;
 	}
 
 	.form-panel h2 {
@@ -371,6 +468,32 @@
 		color: var(--danger);
 	}
 
+	.opt.terkunci {
+		color: var(--text-muted);
+	}
+
+	.barcode-row {
+		display: flex;
+		gap: 0.4rem;
+	}
+
+	.barcode-row input {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.barcode-row input[readonly] {
+		background: var(--bg);
+		color: var(--text-muted);
+		cursor: default;
+	}
+
+	.ganti {
+		flex-shrink: 0;
+		padding: 0 0.8em;
+		font-size: 0.85rem;
+	}
+
 	.error {
 		color: var(--danger);
 		font-size: 0.85rem;
@@ -387,8 +510,25 @@
 		flex: 1;
 	}
 
+	.list-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
 	.list-panel h1 {
 		font-size: 1.3rem;
+	}
+
+	.jumlah {
+		font-size: 0.85rem;
+		color: var(--text-muted);
+	}
+
+	.search {
+		width: 100%;
+		margin-bottom: 1rem;
 	}
 
 	.mono {
@@ -414,6 +554,9 @@
 
 	.log-panel {
 		padding: 1.25rem;
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
 	}
 
 	.log-panel h2 {
@@ -425,7 +568,8 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
-		max-height: 420px;
+		flex: 1;
+		min-height: 0;
 		overflow-y: auto;
 	}
 
