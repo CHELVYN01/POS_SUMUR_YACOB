@@ -44,8 +44,6 @@
 	let barcodeTerkunci = $state<string | null>(null);
 
 	let barcodeInput = $state<HTMLInputElement | null>(null);
-	let namaInput = $state<HTMLInputElement | null>(null);
-	let hargaInput = $state<HTMLInputElement | null>(null);
 
 	let log = $state<LogEntry[]>([]);
 	let formError = $state('');
@@ -133,19 +131,28 @@
 		// produk yang sudah punya barcode mengunci kolomnya.
 		barcode = kunci;
 		barcodeTerkunci = kunci;
-		namaInput?.focus();
+		lepasFokus();
 	}
 
 	/**
-	 * Scan datang padahal form masih memegang barcode lain. Fokus diarahkan ke kolom
-	 * yang memang masih kurang, supaya jelas apa yang harus dikerjakan dulu.
+	 * Melepas fokus dari kolom mana pun. Setelah barcode masuk, tidak boleh ada kolom
+	 * yang memegang fokus: kalau kasir scan lagi karena kebiasaan, angkanya akan
+	 * diketik ke kolom yang sedang fokus — inilah asal barcode nyangkut di Nama Produk
+	 * dan Harga. Tanpa kolom yang fokus, ketikan scanner tidak mendarat di mana pun.
+	 *
+	 * Nama & Harga diisi setelah kasir sendiri yang mengklik kolomnya.
 	 */
+	function lepasFokus() {
+		const active = document.activeElement;
+		if (active instanceof HTMLElement) active.blur();
+	}
+
+	/** Scan datang padahal form masih memegang barcode lain. */
 	function tolakScan() {
 		toast.error(
 			`Selesaikan dulu barcode ${barcodeTerkunci} — isi Nama & Harga lalu Simpan, atau tekan Ganti`
 		);
-		if (!nama.trim()) namaInput?.focus();
-		else if (harga === undefined) hargaInput?.focus();
+		lepasFokus();
 	}
 
 	/** melepas kunci supaya kolom barcode bisa di-scan / diketik ulang */
@@ -289,7 +296,7 @@
 				<label for="barcode">
 					Barcode
 					{#if barcodeTerkunci !== null}
-						<span class="opt terkunci">(terkunci sampai produk ini disimpan)</span>
+						<span class="opt terkunci">(terkunci — klik kolom di bawah untuk mengisi)</span>
 					{:else}
 						<span class="opt required">(wajib, scan atau ketik manual)</span>
 					{/if}
@@ -313,7 +320,6 @@
 				<input
 					id="nama"
 					bind:value={nama}
-					bind:this={namaInput}
 					placeholder="mis. Beras 5kg"
 					use:manualSaja={alihkanScan}
 				/>
@@ -324,7 +330,6 @@
 					type="number"
 					min="0"
 					bind:value={harga}
-					bind:this={hargaInput}
 					placeholder="mis. 65000"
 					use:manualSaja={alihkanScan}
 				/>
