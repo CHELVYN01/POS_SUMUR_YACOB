@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { listBarang, tambahBarang, updateBarang, hapusBarang } from '$lib/db/barang';
+	import {
+		listBarang,
+		tambahBarang,
+		updateBarang,
+		hapusBarang,
+		cariBarangByBarcode
+	} from '$lib/db/barang';
 	import { manualSaja } from '$lib/scanner';
+	import { toast } from '$lib/stores/toast';
 	import type { Barang } from '$lib/types';
 
 	type LogEntry = { waktu: string; pesan: string };
@@ -87,13 +94,19 @@
 		const kunci = kode.trim();
 		if (!kunci) return;
 
-		barcode = kunci;
-
 		const existing = barangList.find((b) => b.barcode === kunci);
+
 		if (existing) {
 			edit(existing);
+			toast.info(`Barcode sudah ada — "${existing.nama}" dimuat untuk diedit`);
+		} else if (editId !== null) {
+			// Barcode baru di-scan sementara form masih mengedit produk lain. Tanpa reset,
+			// nama/harga produk lama tetap tertinggal di form dan editId masih menunjuk ke
+			// produk itu — menyimpannya justru menimpa produk lama dengan barcode baru ini.
+			resetForm();
 		}
 
+		barcode = kunci;
 		namaInput?.focus();
 	}
 
@@ -130,12 +143,37 @@
 		const barcodeVal = barcode.trim();
 		const input = { nama: nama.trim(), harga, qty: qtyNum, barcode: barcodeVal };
 
-		if (editId !== null) {
-			await updateBarang(editId, input);
-			catatLog(`Edit produk ${input.nama}${ringkasPerubahan(editSebelum, input)}`);
-		} else {
-			await tambahBarang(input);
-			catatLog(`Tambah produk ${input.nama}`);
+		// Kolom barcode UNIQUE di database, jadi duplikat akan ditolak SQLite dengan
+		// error mentah. Dicegat di sini supaya pesannya jelas dan menyebut produknya.
+		const pemilik = await cariBarangByBarcode(barcodeVal);
+		if (pemilik && pemilik.id !== editId) {
+			toast.error(`Barcode ${barcodeVal} sudah dipakai produk "${pemilik.nama}"`);
+			barcodeInput?.focus();
+			barcodeInput?.select();
+			return;
+		}
+
+		try {
+			if (editId !== null) {
+				await updateBarang(editId, input);
+				catatLog(`Edit produk ${input.nama}${ringkasPerubahan(editSebelum, input)}`);
+				toast.sukses(`Produk "${input.nama}" disimpan`);
+			} else {
+				await tambahBarang(input);
+				catatLog(`Tambah produk ${input.nama}`);
+				toast.sukses(`Produk "${input.nama}" ditambahkan`);
+			}
+		} catch (err) {
+			// Tanpa ini kegagalan simpan lewat tanpa jejak: form tetap terisi dan
+			// tidak ada tanda apa pun bahwa produknya belum masuk.
+			console.error('Gagal menyimpan produk:', err);
+			const pesan = String(err);
+			toast.error(
+				pesan.includes('UNIQUE')
+					? `Barcode ${barcodeVal} sudah dipakai produk lain`
+					: 'Gagal menyimpan produk. Coba lagi.'
+			);
+			return;
 		}
 
 		barangList = await listBarang();

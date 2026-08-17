@@ -8,6 +8,7 @@
 	import { tokoInfo } from '$lib/stores/toko';
 	import { getDb } from '$lib/db';
 	import { runAutoBackupIfDue } from '$lib/db-manager';
+	import Toast from '$lib/components/Toast.svelte';
 
 	let { children } = $props();
 
@@ -139,6 +140,8 @@
 		</main>
 	</div>
 </div>
+
+<Toast />
 
 <style>
 	.shell {
