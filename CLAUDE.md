@@ -47,3 +47,29 @@ pos-app/
 - Setiap fitur/perubahan yang selesai dicatat di [list_done.md](docs\list_done.md) dengan format:
   `tanggal - nama fitur - git commit hash`
 - Commit hanya dibuat saat diminta eksplisit oleh user.
+
+## Rilis
+
+Setiap kali user minta rilis/build, **selalu buat versi baru** — jangan pernah
+menimpa atau memakai ulang versi yang sudah pernah dirilis. Versi lama tetap ada
+di halaman Releases sebagai riwayat, dan yang dipasang di mesin client selalu
+yang terbaru.
+
+Langkahnya:
+
+1. Naikkan nomor versi di **empat** tempat sekaligus, harus sama semua:
+   - `pos-app/package.json`
+   - `pos-app/package-lock.json` (pakai `npm version <versi> --no-git-tag-version`)
+   - `pos-app/src-tauri/tauri.conf.json` ← ini yang menentukan versi installer
+   - `pos-app/src-tauri/Cargo.toml`
+2. Commit kenaikan versi itu.
+3. Buat tag `v<versi>` lalu push tag-nya — workflow
+   [build-windows.yml](.github/workflows/build-windows.yml) hanya jalan untuk
+   membuat Release kalau ada tag `v*`.
+4. Installer muncul di halaman Releases sebagai **draft** untuk diperiksa dulu,
+   dan juga di bagian Artifacts pada run-nya.
+
+Kenapa harus naik terus: kalau versinya tidak berubah, sulit memastikan mesin
+client benar-benar memakai build terbaru — gejala lama bisa muncul lagi hanya
+karena yang terpasang ternyata installer yang itu-itu juga. Nomor versi yang
+tampil di dalam app (fix 9) dipakai untuk memverifikasi hal ini.
