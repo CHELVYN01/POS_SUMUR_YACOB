@@ -49,10 +49,18 @@ async function seedIfNeeded(db: Database): Promise<void> {
 
 export function getDb(): Promise<Database> {
 	if (!dbPromise) {
-		dbPromise = Database.load('sqlite:pos.db').then(async (db) => {
-			await seedIfNeeded(db);
-			return db;
-		});
+		// Kegagalan tidak boleh ikut ter-cache: kalau promise reject-nya disimpan, satu error
+		// (mis. migration gagal) mengunci seluruh sesi app dan percobaan login berikutnya
+		// langsung dapat error yang sama tanpa pernah mencoba konek ulang.
+		dbPromise = Database.load('sqlite:pos.db')
+			.then(async (db) => {
+				await seedIfNeeded(db);
+				return db;
+			})
+			.catch((err) => {
+				dbPromise = null;
+				throw err;
+			});
 	}
 	return dbPromise;
 }

@@ -28,6 +28,8 @@ fn migrations() -> Vec<Migration> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     db_manager::apply_pending_db_swap_if_any();
+    // Urutannya penting: swap dulu (file bisa berganti), baru periksa checksum file final.
+    db_manager::repair_legacy_migration_checksums();
 
     tauri::Builder::default()
         .plugin(

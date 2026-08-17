@@ -113,6 +113,103 @@ pub fn apply_pending_db_swap_if_any() {
     }
 }
 
+/// SQL migration files are supposed to be immutable once shipped: sqlx stores a SHA-384 of each
+/// file in `_sqlx_migrations` and refuses to open the database when the file no longer hashes to
+/// the recorded value. `0001_initial.sql` was edited after release anyway (Fase 13 moved the seed
+/// INSERTs to the frontend), so every database created before that release now aborts on the very
+/// first `Database.load()` — which in this app is the login screen, making the app unusable.
+///
+/// The edit only removed INSERT statements; the CREATE TABLE / CREATE INDEX part is byte-identical,
+/// so those old databases already have exactly the schema the current file produces. Re-stamping
+/// the recorded checksum is therefore safe, and no user data is read or written.
+///
+/// Each entry is a checksum that is *known* to correspond to an obsolete revision of that
+/// migration — never a blanket "any mismatch is fine", which would silently paper over a real
+/// schema divergence. Both LF and CRLF hashes are listed because the checksum covers raw file
+/// bytes, and a Windows checkout may have normalised the line endings.
+const LEGACY_MIGRATION_CHECKSUMS: &[(i64, &str, &str)] = &[
+    // 0001_initial.sql sebelum Fase 13 (masih memuat seed user + 8 barang contoh), LF.
+    (
+        1,
+        "58d66c61789dd421725d8e0b88d5176cb7e0520f2f12931ed1da9084f1c7bb8e2a5c060c8129ef920dddf725a144f400",
+        include_str!("../migrations/0001_initial.sql"),
+    ),
+    // Isi yang sama, tapi di-checkout dengan CRLF (build Windows).
+    (
+        1,
+        "9e00028f194d324aaaa10d08afae277625590eb773e78b0bfad8d117c7a61e66466d50fbe8ac459bfb09865a303d711b",
+        include_str!("../migrations/0001_initial.sql"),
+    ),
+];
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Must run before the sql plugin is mounted, for the same reason as
+/// [`apply_pending_db_swap_if_any`]: no live SQLite connection may exist yet. Failures are
+/// deliberately swallowed — if the repair cannot run, the app should still start and surface
+/// tauri-plugin-sql's own error rather than die here.
+pub fn repair_legacy_migration_checksums() {
+    let db = db_path(&app_data_dir_manual());
+    if !db.exists() {
+        return;
+    }
+    if let Err(e) = tauri::async_runtime::block_on(repair_checksums(&db)) {
+        eprintln!("[db] perbaikan checksum migration dilewati: {e}");
+    }
+}
+
+async fn repair_checksums(db: &Path) -> Result<(), String> {
+    use sha2::{Digest, Sha384};
+    use sqlx::sqlite::SqliteConnectOptions;
+    use sqlx::{Connection, Row, SqliteConnection};
+
+    let opts = SqliteConnectOptions::new()
+        .filename(db)
+        .create_if_missing(false);
+    let mut conn = SqliteConnection::connect_with(&opts)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let has_table = sqlx::query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'")
+        .fetch_optional(&mut conn)
+        .await
+        .map_err(|e| e.to_string())?
+        .is_some();
+    if !has_table {
+        // Fresh database — tauri-plugin-sql will create the table and apply everything itself.
+        return conn.close().await.map_err(|e| e.to_string());
+    }
+
+    for (version, legacy_hex, current_sql) in LEGACY_MIGRATION_CHECKSUMS {
+        let row = sqlx::query("SELECT checksum FROM _sqlx_migrations WHERE version = ?")
+            .bind(version)
+            .fetch_optional(&mut conn)
+            .await
+            .map_err(|e| e.to_string())?;
+        let Some(row) = row else { continue };
+        let stored: Vec<u8> = row.try_get("checksum").map_err(|e| e.to_string())?;
+        if to_hex(&stored) != *legacy_hex {
+            continue;
+        }
+
+        let current = Sha384::digest(current_sql.as_bytes()).to_vec();
+        if current == stored {
+            continue;
+        }
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+            .bind(current)
+            .bind(version)
+            .execute(&mut conn)
+            .await
+            .map_err(|e| e.to_string())?;
+        eprintln!("[db] checksum migration {version} lama di-stamp ulang ke isi file sekarang");
+    }
+
+    conn.close().await.map_err(|e| e.to_string())
+}
+
 /// Reads (and consumes) the pending post-reset admin payload, if any. Called from the frontend
 /// after `getDb()` has resolved, which guarantees tauri-plugin-sql has already finished running
 /// migrations on `pos.db` — running this from a Rust `.setup()` hook is NOT safe, because
@@ -394,4 +491,116 @@ pub fn set_master_password(
     fs::write(dir.join("db-manager-auth.json"), json).map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sha2::{Digest, Sha384};
+    use sqlx::sqlite::SqliteConnectOptions;
+    use sqlx::{Connection, Row, SqliteConnection};
+
+    /// Builds a database that looks exactly like one created before Fase 13: the schema the
+    /// current 0001 produces, but with the *old* checksum recorded — the state that makes
+    /// tauri-plugin-sql abort at login.
+    async fn make_stale_db(path: &Path, recorded: &str) {
+        let opts = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true);
+        let mut conn = SqliteConnection::connect_with(&opts).await.unwrap();
+        sqlx::query(
+            "CREATE TABLE _sqlx_migrations (
+                version BIGINT PRIMARY KEY,
+                description TEXT NOT NULL,
+                installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                success BOOLEAN NOT NULL,
+                checksum BLOB NOT NULL,
+                execution_time BIGINT NOT NULL
+            )",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        let bytes: Vec<u8> = (0..recorded.len() / 2)
+            .map(|i| u8::from_str_radix(&recorded[i * 2..i * 2 + 2], 16).unwrap())
+            .collect();
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations
+             (version, description, success, checksum, execution_time)
+             VALUES (1, 'create_initial_tables', 1, ?, 0)",
+        )
+        .bind(bytes)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        conn.close().await.unwrap();
+    }
+
+    async fn stored_checksum(path: &Path) -> Vec<u8> {
+        let opts = SqliteConnectOptions::new().filename(path);
+        let mut conn = SqliteConnection::connect_with(&opts).await.unwrap();
+        let row = sqlx::query("SELECT checksum FROM _sqlx_migrations WHERE version = 1")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        let out: Vec<u8> = row.try_get("checksum").unwrap();
+        conn.close().await.unwrap();
+        out
+    }
+
+    fn current_0001() -> Vec<u8> {
+        Sha384::digest(include_str!("../migrations/0001_initial.sql").as_bytes()).to_vec()
+    }
+
+    #[tokio::test]
+    async fn restamps_known_legacy_checksum() {
+        for legacy in [
+            "58d66c61789dd421725d8e0b88d5176cb7e0520f2f12931ed1da9084f1c7bb8e2a5c060c8129ef920dddf725a144f400",
+            "9e00028f194d324aaaa10d08afae277625590eb773e78b0bfad8d117c7a61e66466d50fbe8ac459bfb09865a303d711b",
+        ] {
+            let dir = std::env::temp_dir().join(format!("pos-test-{legacy:.8}"));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let db = dir.join("pos.db");
+
+            make_stale_db(&db, legacy).await;
+            repair_checksums(&db).await.unwrap();
+
+            assert_eq!(stored_checksum(&db).await, current_0001());
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// An unrecognised checksum must be left alone: it could mean a genuine schema divergence,
+    /// and silently stamping over it would hide a real problem.
+    #[tokio::test]
+    async fn leaves_unknown_checksum_untouched() {
+        let dir = std::env::temp_dir().join("pos-test-unknown");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("pos.db");
+
+        let unknown = "aa".repeat(48);
+        make_stale_db(&db, &unknown).await;
+        repair_checksums(&db).await.unwrap();
+
+        assert_eq!(stored_checksum(&db).await, vec![0xaa; 48]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Already-healthy databases (and re-runs of the repair) must be no-ops.
+    #[tokio::test]
+    async fn idempotent_on_healthy_db() {
+        let dir = std::env::temp_dir().join("pos-test-healthy");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("pos.db");
+
+        make_stale_db(&db, &to_hex(&current_0001())).await;
+        repair_checksums(&db).await.unwrap();
+        repair_checksums(&db).await.unwrap();
+
+        assert_eq!(stored_checksum(&db).await, current_0001());
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

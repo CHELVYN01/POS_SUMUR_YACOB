@@ -30,4 +30,11 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 argon2 = { version = "0.5", features = ["std"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 dirs = "5"
+# Dipakai hanya untuk memperbaiki checksum migration di _sqlx_migrations sebelum
+# tauri-plugin-sql mount. Versi sqlx harus sama dengan yang dipakai plugin.
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
 
