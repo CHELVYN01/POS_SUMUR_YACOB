@@ -154,6 +154,13 @@
 		display: flex;
 		flex-direction: column;
 		padding: 0 1rem 1.25rem 1rem;
+		/* Tanpa ini sidebar ikut meregang setinggi isi halaman, sehingga footer-nya
+		   (Pengaturan, nama user, Keluar) terdorong ke dasar halaman dan tidak terlihat
+		   begitu daftar produk jadi panjang. */
+		position: sticky;
+		top: 0;
+		align-self: flex-start;
+		height: 100vh;
 	}
 
 	.brand {
@@ -198,6 +205,10 @@
 		flex-direction: column;
 		gap: 0.15rem;
 		flex: 1;
+		/* Kalau menunya nanti bertambah banyak, yang menggulung cukup daftar menunya —
+		   footer sidebar tetap menempel di bawah. */
+		overflow-y: auto;
+		min-height: 0;
 	}
 
 	nav a {
