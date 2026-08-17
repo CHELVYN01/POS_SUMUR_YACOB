@@ -108,17 +108,48 @@ Build menghasilkan dua installer:
 | `pos-app_<versi>_x64-setup.exe` | **Ini yang dibagikan.** Installer NSIS, paling toleran terhadap Windows lawas. |
 | `pos-app_<versi>_x64_en-US.msi` | Cadangan, untuk deploy via Group Policy di jaringan kantor. |
 
-### Soal Windows 7
+### Pemasangan tanpa internet
 
-`tauri.conf.json` sudah diset `webviewInstallMode: "embedBootstrapper"`. Ini
-menempelkan installer WebView2 ke dalam installer POS (+~1.8 MB), sehingga
-pemasangan **tidak butuh internet** dan tidak gagal gara-gara Windows 7 lawas
-tidak mengaktifkan TLS 1.2.
+`tauri.conf.json` diset `webviewInstallMode: "offlineInstaller"`. Runtime
+WebView2 lengkap ditempelkan ke dalam installer, jadi pemasangan **benar-benar
+tidak butuh internet** — cocok untuk kios yang jaringannya tidak bisa
+diandalkan. Konsekuensinya installer membengkak dari ~5 MB jadi **~130 MB**.
 
-Catatan jujur: Microsoft sudah menghentikan dukungan WebView2 untuk Windows 7.
-App tetap bisa dipasang dan jalan, tapi memakai WebView2 versi lama yang tidak
-lagi menerima update keamanan. Kalau client masih di Windows 7, ini bisa
-diterima untuk POS offline — tapi Windows 10 ke atas tetap jauh lebih aman.
+Mode sebelumnya (`embedBootstrapper`) menempelkan *bootstrapper*-nya saja
+(~1.8 MB), dan bootstrapper itu tetap mengunduh runtime dari server Microsoft.
+Manfaat nyatanya cuma menghindari kegagalan gara-gara Windows lawas tidak
+mengaktifkan TLS 1.2 — bukan pemasangan offline. Jangan tertukar.
+
+### Windows 7: TIDAK didukung
+
+Sudah diuji langsung di mesin client (2026-08-17) dan hasilnya gagal:
+
+```
+The procedure entry point GetPackagesByPackageFamily could not be located
+in the dynamic link library KERNEL32.dll
+```
+
+`GetPackagesByPackageFamily` adalah API Windows 8+. Windows 7 tidak punya
+fungsi itu, jadi proses gagal dimuat sebelum satu baris kode pun jalan. Ini
+terjadi di luar urusan WebView2 — mengganti `webviewInstallMode` tidak
+menolong sama sekali.
+
+Akar masalahnya: **Tauri v2 menetapkan Windows 10 (1803) sebagai minimum**.
+Windows 7 dulu didukung di Tauri v1 dan di-drop di v2. Microsoft juga sudah
+menghentikan dukungan WebView2 untuk Windows 7 (versi terakhir: 109).
+
+Pilihan yang tersedia, dari yang paling masuk akal:
+
+1. **Naikkan PC client ke Windows 10.** Paling murah dan paling waras. Windows
+   7 juga sudah tidak menerima update keamanan sejak Januari 2020 — untuk mesin
+   yang memegang data transaksi, ini risiko tersendiri.
+2. **Turunkan project ke Tauri v1.** Bisa jalan di Win7, tapi rework besar:
+   semua plugin (`sql`, `dialog`, `fs`, `opener`) harus turun ke versi v1,
+   toolchain Rust harus dipin ke target `x86_64-win7-windows-msvc`, dan
+   WebView2 109 tetap harus dipasang manual di mesin client.
+3. **Ganti pendekatan**: jalankan POS sebagai web app lokal dan buka lewat
+   browser yang masih mendukung Win7 (mis. Firefox ESR 115). Butuh perombakan
+   arsitektur karena akses SQLite sekarang lewat plugin Tauri.
 
 ---
 
