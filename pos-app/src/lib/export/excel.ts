@@ -1,7 +1,8 @@
 import ExcelJS from 'exceljs';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
-import type { KasBon, Penjualan } from '$lib/types';
+import type { KasBon, Penjualan, Ringkasan } from '$lib/types';
+import { formatTanggal, formatTanggalJam, formatTanggalLokal } from '$lib/utils/format';
 
 const HIJAU = 'FF2F6E4F';
 const HIJAU_MUDA = 'FFE8F3EC';
@@ -20,7 +21,12 @@ function formatTanggalFile() {
 	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function judulSheet(ws: ExcelJS.Worksheet, teks: string, kolomTerakhir: number) {
+function judulSheet(
+	ws: ExcelJS.Worksheet,
+	teks: string,
+	kolomTerakhir: number,
+	periode?: string
+) {
 	ws.mergeCells(1, 1, 1, kolomTerakhir);
 	const cell = ws.getCell(1, 1);
 	cell.value = teks;
@@ -30,7 +36,9 @@ function judulSheet(ws: ExcelJS.Worksheet, teks: string, kolomTerakhir: number) 
 
 	ws.mergeCells(2, 1, 2, kolomTerakhir);
 	const sub = ws.getCell(2, 1);
-	sub.value = `Dicetak ${new Date().toLocaleString('id-ID')}`;
+	sub.value = periode
+		? `Periode ${periode} — dicetak ${new Date().toLocaleString('id-ID')}`
+		: `Dicetak ${new Date().toLocaleString('id-ID')}`;
 	sub.font = { italic: true, size: 9, color: { argb: 'FF767671' } };
 	ws.getRow(2).height = 16;
 }
@@ -56,68 +64,61 @@ function styleBarisData(ws: ExcelJS.Worksheet, rowIndex: number, jumlahKolom: nu
 	}
 }
 
-function buatSheetDashboard(wb: ExcelJS.Workbook, penjualan: Penjualan[], kasbon: KasBon[]) {
-	const ws = wb.addWorksheet('Dashboard');
-	ws.columns = [{ width: 26 }, { width: 20 }];
+type BarisRingkasan = { label: string; nilai: number; rupiah?: boolean };
 
-	judulSheet(ws, 'Laporan Kios Sumur Yacob', 2);
+/**
+ * Blok "judul + daftar label/nilai" yang dipakai sheet Dashboard dan Hari Ini.
+ * Format rupiah ditentukan eksplisit per baris — sebelumnya ditebak dari kata
+ * "total" pada label, sehingga jumlah transaksi (sebuah cacah) ikut tercetak "Rp".
+ */
+function tambahBagian(ws: ExcelJS.Worksheet, judul: string, baris: BarisRingkasan[]) {
+	const rJudul = ws.lastRow!.number + 2;
+	ws.mergeCells(rJudul, 1, rJudul, 2);
+	const cellJudul = ws.getCell(rJudul, 1);
+	cellJudul.value = judul;
+	cellJudul.font = { bold: true, size: 12, color: { argb: HIJAU } };
+	cellJudul.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HIJAU_MUDA } };
+	cellJudul.alignment = { vertical: 'middle' };
+	ws.getRow(rJudul).height = 20;
 
-	const totalPenjualan = penjualan.reduce((sum, p) => sum + p.total, 0);
-	const totalBon = kasbon.reduce((sum, k) => sum + k.total, 0);
-	const bonAktif = kasbon.filter((k) => k.status === 'belum_lunas');
-	const bonLunas = kasbon.filter((k) => k.status === 'lunas');
-	const totalBelumLunas = bonAktif.reduce((sum, k) => sum + k.sisa, 0);
-
-	function tambahBagian(judul: string, baris: [string, number][]) {
-		const rJudul = ws.lastRow!.number + 2;
-		ws.mergeCells(rJudul, 1, rJudul, 2);
-		const cellJudul = ws.getCell(rJudul, 1);
-		cellJudul.value = judul;
-		cellJudul.font = { bold: true, size: 12, color: { argb: HIJAU } };
-		cellJudul.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HIJAU_MUDA } };
-		cellJudul.alignment = { vertical: 'middle' };
-		ws.getRow(rJudul).height = 20;
-
-		baris.forEach(([label, nilai], i) => {
-			const r = rJudul + 1 + i;
-			ws.getCell(r, 1).value = label;
-			ws.getCell(r, 2).value = nilai;
-			ws.getCell(r, 2).numFmt = Number.isInteger(nilai) && label.toLowerCase().includes('total') ? RUPIAH_FMT : '#,##0';
-			ws.getCell(r, 1).border = BORDER_TIPIS;
-			ws.getCell(r, 2).border = BORDER_TIPIS;
-		});
-	}
-
-	tambahBagian('Ringkasan Penjualan', [
-		['Total Transaksi', penjualan.length],
-		['Total Penjualan', totalPenjualan]
-	]);
-
-	tambahBagian('Ringkasan Kas Bon', [
-		['Jumlah Bon', kasbon.length],
-		['Total Nilai Bon', totalBon],
-		['Bon Belum Lunas', bonAktif.length],
-		['Total Belum Dibayar', totalBelumLunas],
-		['Bon Lunas', bonLunas.length]
-	]);
+	baris.forEach((b, i) => {
+		const r = rJudul + 1 + i;
+		ws.getCell(r, 1).value = b.label;
+		ws.getCell(r, 2).value = b.nilai;
+		ws.getCell(r, 2).numFmt = b.rupiah ? RUPIAH_FMT : '#,##0';
+		ws.getCell(r, 1).border = BORDER_TIPIS;
+		ws.getCell(r, 2).border = BORDER_TIPIS;
+	});
 }
 
-function buatSheetPenjualan(wb: ExcelJS.Workbook, penjualan: Penjualan[]) {
-	const ws = wb.addWorksheet('Penjualan');
-	const header = ['Tanggal', 'Kasir', 'Barang', 'Jumlah', 'Harga Satuan', 'Subtotal', 'Total Transaksi'];
-	ws.columns = [
-		{ width: 20 },
-		{ width: 14 },
-		{ width: 26 },
-		{ width: 9 },
-		{ width: 15 },
-		{ width: 15 },
-		{ width: 17 }
-	];
+const HEADER_PENJUALAN = [
+	'Waktu',
+	'Kasir',
+	'Barang',
+	'Jumlah',
+	'Harga Satuan',
+	'Subtotal',
+	'Total Transaksi'
+];
 
-	judulSheet(ws, 'Laporan Penjualan', header.length);
+const LEBAR_PENJUALAN = [
+	{ width: 22 },
+	{ width: 14 },
+	{ width: 26 },
+	{ width: 9 },
+	{ width: 15 },
+	{ width: 15 },
+	{ width: 17 }
+];
 
-	const rHeader = 4;
+/** Tabel transaksi (satu baris per item, kolom transaksi di-merge) untuk dua sheet. */
+function tulisTabelPenjualan(
+	ws: ExcelJS.Worksheet,
+	penjualan: Penjualan[],
+	rHeader: number,
+	bekukan: boolean
+) {
+	const header = HEADER_PENJUALAN;
 	header.forEach((h, i) => (ws.getCell(rHeader, i + 1).value = h));
 	styleHeaderBaris(ws, rHeader, header.length);
 
@@ -137,7 +138,9 @@ function buatSheetPenjualan(wb: ExcelJS.Workbook, penjualan: Penjualan[]) {
 
 		items.forEach((item, i) => {
 			const row = ws.getRow(r);
-			row.getCell(1).value = i === 0 ? p.tanggal : '';
+			// Tanggal diformat dulu: kolom di DB berisi UTC, kalau ditulis mentah
+			// jam & tanggalnya meleset sebesar offset zona.
+			row.getCell(1).value = i === 0 ? formatTanggalJam(p.tanggal) : '';
 			row.getCell(2).value = i === 0 ? p.kasir : '';
 			row.getCell(3).value = item.nama;
 			row.getCell(4).value = item.jumlah || '';
@@ -164,10 +167,81 @@ function buatSheetPenjualan(wb: ExcelJS.Workbook, penjualan: Penjualan[]) {
 	}
 
 	ws.autoFilter = { from: { row: rHeader, column: 1 }, to: { row: rHeader, column: header.length } };
-	ws.views = [{ state: 'frozen', ySplit: rHeader }];
+	if (bekukan) ws.views = [{ state: 'frozen', ySplit: rHeader }];
 }
 
-function buatSheetBon(wb: ExcelJS.Workbook, kasbon: KasBon[]) {
+function buatSheetDashboard(
+	wb: ExcelJS.Workbook,
+	penjualan: Penjualan[],
+	kasbon: KasBon[],
+	periode?: string
+) {
+	const ws = wb.addWorksheet('Dashboard');
+	ws.columns = [{ width: 26 }, { width: 20 }];
+
+	judulSheet(ws, 'Laporan Kios Sumur Yacob', 2, periode);
+
+	const totalPenjualan = penjualan.reduce((sum, p) => sum + p.total, 0);
+	const totalBon = kasbon.reduce((sum, k) => sum + k.total, 0);
+	const bonAktif = kasbon.filter((k) => k.status === 'belum_lunas');
+	const bonLunas = kasbon.filter((k) => k.status === 'lunas');
+	const totalBelumLunas = bonAktif.reduce((sum, k) => sum + k.sisa, 0);
+
+	tambahBagian(ws, 'Ringkasan Penjualan', [
+		{ label: 'Total Transaksi', nilai: penjualan.length },
+		{ label: 'Total Penjualan', nilai: totalPenjualan, rupiah: true }
+	]);
+
+	tambahBagian(ws, 'Ringkasan Kas Bon', [
+		{ label: 'Jumlah Bon', nilai: kasbon.length },
+		{ label: 'Total Nilai Bon', nilai: totalBon, rupiah: true },
+		{ label: 'Bon Belum Lunas', nilai: bonAktif.length },
+		{ label: 'Total Belum Dibayar', nilai: totalBelumLunas, rupiah: true },
+		{ label: 'Bon Lunas', nilai: bonLunas.length }
+	]);
+}
+
+function buatSheetPenjualan(wb: ExcelJS.Workbook, penjualan: Penjualan[], periode?: string) {
+	const ws = wb.addWorksheet('Penjualan');
+	ws.columns = [...LEBAR_PENJUALAN];
+
+	judulSheet(ws, 'Laporan Penjualan', HEADER_PENJUALAN.length, periode);
+	tulisTabelPenjualan(ws, penjualan, 4, true);
+}
+
+/**
+ * Sheet khusus hari ini, sengaja ditaruh paling depan supaya jadi sheet yang
+ * terbuka pertama kali — angka harian yang paling sering dilihat.
+ * Isinya selalu data hari ini, tidak ikut filter tab/rentang yang sedang aktif.
+ */
+function buatSheetHariIni(
+	wb: ExcelJS.Workbook,
+	data: { label: string; ringkasan: Ringkasan; penjualan: Penjualan[] }
+) {
+	const ws = wb.addWorksheet('Hari Ini');
+	ws.columns = [...LEBAR_PENJUALAN];
+
+	judulSheet(ws, 'Penjualan Hari Ini', HEADER_PENJUALAN.length, data.label);
+
+	const r = data.ringkasan;
+	tambahBagian(ws, 'Ringkasan Hari Ini', [
+		{ label: 'Total Penjualan', nilai: r.totalPenjualan, rupiah: true },
+		{ label: 'Jumlah Transaksi', nilai: r.jumlahTransaksi },
+		{ label: 'Rata-rata per Transaksi', nilai: r.rataRata, rupiah: true }
+	]);
+
+	tambahBagian(ws, 'Kas Bon Hari Ini', [
+		{ label: 'Bon Baru', nilai: r.bonBaru, rupiah: true },
+		{ label: 'Jumlah Bon Baru', nilai: r.jumlahBon },
+		{ label: 'Bon Dibayar', nilai: r.bonDibayar, rupiah: true },
+		{ label: 'Uang Masuk (tunai + bon dibayar)', nilai: r.totalPenjualan + r.bonDibayar, rupiah: true }
+	]);
+
+	const rHeader = ws.lastRow!.number + 2;
+	tulisTabelPenjualan(ws, data.penjualan, rHeader, false);
+}
+
+function buatSheetBon(wb: ExcelJS.Workbook, kasbon: KasBon[], periode?: string) {
 	const ws = wb.addWorksheet('Bon');
 	const header = [
 		'Pengutang',
@@ -196,7 +270,7 @@ function buatSheetBon(wb: ExcelJS.Workbook, kasbon: KasBon[]) {
 		{ width: 13 }
 	];
 
-	judulSheet(ws, 'Laporan Kas Bon', header.length);
+	judulSheet(ws, 'Laporan Kas Bon', header.length, periode);
 
 	const rHeader = 4;
 	header.forEach((h, i) => (ws.getCell(rHeader, i + 1).value = h));
@@ -220,8 +294,9 @@ function buatSheetBon(wb: ExcelJS.Workbook, kasbon: KasBon[]) {
 		items.forEach((item, i) => {
 			const row = ws.getRow(r);
 			row.getCell(1).value = i === 0 ? k.namaPengutang : '';
-			row.getCell(2).value = i === 0 ? k.tanggal : '';
-			row.getCell(3).value = i === 0 ? (k.jatuhTempo ?? '-') : '';
+			row.getCell(2).value = i === 0 ? formatTanggal(k.tanggal) : '';
+			// jatuh_tempo disimpan sebagai tanggal polos lokal, bukan datetime UTC
+			row.getCell(3).value = i === 0 ? (k.jatuhTempo ? formatTanggalLokal(k.jatuhTempo) : '-') : '';
 			row.getCell(4).value = item.nama;
 			row.getCell(5).value = item.jumlah || '';
 			row.getCell(6).value = item.harga || '';
@@ -260,17 +335,31 @@ function buatSheetBon(wb: ExcelJS.Workbook, kasbon: KasBon[]) {
 	ws.views = [{ state: 'frozen', ySplit: rHeader }];
 }
 
-export async function exportLaporanExcel(penjualan: Penjualan[], kasbon: KasBon[]): Promise<boolean> {
+/**
+ * `opts.periode` cuma keterangan yang dicetak di subjudul tiap sheet, dan
+ * `opts.namaFile` mengganti nama file default — penyaringan datanya sendiri
+ * dilakukan pemanggil, fungsi ini menulis apa pun array yang diberikan.
+ */
+export async function exportLaporanExcel(
+	penjualan: Penjualan[],
+	kasbon: KasBon[],
+	opts?: {
+		periode?: string;
+		namaFile?: string;
+		hariIni?: { label: string; ringkasan: Ringkasan; penjualan: Penjualan[] };
+	}
+): Promise<boolean> {
 	const wb = new ExcelJS.Workbook();
 	wb.creator = 'POS Kios Sumur Yacob';
 	wb.created = new Date();
 
-	buatSheetDashboard(wb, penjualan, kasbon);
-	buatSheetPenjualan(wb, penjualan);
-	buatSheetBon(wb, kasbon);
+	if (opts?.hariIni) buatSheetHariIni(wb, opts.hariIni);
+	buatSheetDashboard(wb, penjualan, kasbon, opts?.periode);
+	buatSheetPenjualan(wb, penjualan, opts?.periode);
+	buatSheetBon(wb, kasbon, opts?.periode);
 
 	const path = await save({
-		defaultPath: `Laporan-${formatTanggalFile()}.xlsx`,
+		defaultPath: `${opts?.namaFile ?? `Laporan-${formatTanggalFile()}`}.xlsx`,
 		filters: [{ name: 'Excel', extensions: ['xlsx'] }]
 	});
 	if (!path) return false;

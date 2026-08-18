@@ -54,3 +54,29 @@ export type KasBon = {
 	sudahDibayar: number;
 	sisa: number;
 };
+
+export type TitikGrafik = {
+	/** Kunci mentah dari SQL — "2026-08-18" untuk harian, "14" untuk per jam. */
+	kunci: string;
+	/** Label pendek yang ditampilkan di sumbu X. */
+	label: string;
+	nilai: number;
+	/** Deret kedua, dipakai grafik bon (nilai = bon baru, nilai2 = bon dibayar). */
+	nilai2?: number;
+	jumlah?: number;
+};
+
+export type Ringkasan = {
+	totalPenjualan: number;
+	jumlahTransaksi: number;
+	rataRata: number;
+	bonBaru: number;
+	jumlahBon: number;
+	bonDibayar: number;
+};
+
+export type BarangTerjual = {
+	nama: string;
+	totalQty: number;
+	totalNilai: number;
+};

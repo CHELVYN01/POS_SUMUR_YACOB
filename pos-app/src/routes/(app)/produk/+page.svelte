@@ -10,6 +10,7 @@
 	import { manualSaja } from '$lib/scanner';
 	import { toast } from '$lib/stores/toast';
 	import type { Barang } from '$lib/types';
+	import { formatRupiah } from '$lib/utils/format';
 
 	type LogEntry = { waktu: string; pesan: string };
 
@@ -77,10 +78,6 @@
 			document.removeEventListener('mouseup', handler);
 		};
 	});
-
-	function formatRupiah(n: number) {
-		return 'Rp' + n.toLocaleString('id-ID');
-	}
 
 	function ringkasPerubahan(
 		sebelum: Barang | null,

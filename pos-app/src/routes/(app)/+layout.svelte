@@ -42,14 +42,14 @@
 			icon: 'M3.5 7.5 12 3l8.5 4.5-8.5 4.5-8.5-4.5Z M3.5 7.5V16.5L12 21l8.5-4.5V7.5 M12 12v9'
 		},
 		{
-			href: '/laporan',
-			label: 'Laporan',
-			icon: 'M6 3.5h9l3 3V20.5H6V3.5Z M9 9.5h6 M9 13h6 M9 16.5h4'
-		},
-		{
 			href: '/kasbon',
 			label: 'Kas Bon',
 			icon: 'M4 6.5h16v11H4z M4 10h16 M8 15.5h4'
+		},
+		{
+			href: '/laporan',
+			label: 'Laporan',
+			icon: 'M6 3.5h9l3 3V20.5H6V3.5Z M9 9.5h6 M9 13h6 M9 16.5h4'
 		}
 	];
 

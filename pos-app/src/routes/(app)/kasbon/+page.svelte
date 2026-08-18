@@ -5,6 +5,7 @@
 	import { currentUser } from '$lib/stores/session';
 	import DatePicker from '$lib/components/DatePicker.svelte';
 	import type { Barang, ItemKasBon, KasBon } from '$lib/types';
+	import { formatRupiah, formatTanggal, formatTanggalLokal } from '$lib/utils/format';
 
 	let cari = $state('');
 	let cart = $state<ItemKasBon[]>([]);
@@ -38,18 +39,6 @@
 
 	let bonAktif = $derived(daftarKasBon.filter((k) => k.status === 'belum_lunas'));
 	let bonLunas = $derived(daftarKasBon.filter((k) => k.status === 'lunas'));
-
-	function formatRupiah(n: number) {
-		return 'Rp' + n.toLocaleString('id-ID');
-	}
-
-	function formatTanggal(iso: string) {
-		return new Date(iso.replace(' ', 'T')).toLocaleDateString('id-ID', {
-			day: 'numeric',
-			month: 'short',
-			year: 'numeric'
-		});
-	}
 
 	function bukaTambah() {
 		cari = '';
@@ -192,7 +181,7 @@
 							<tr>
 								<td>{bon.namaPengutang}</td>
 								<td>{formatTanggal(bon.tanggal)}</td>
-								<td>{bon.jatuhTempo ? formatTanggal(bon.jatuhTempo) : '-'}</td>
+								<td>{bon.jatuhTempo ? formatTanggalLokal(bon.jatuhTempo) : '-'}</td>
 								<td>{formatRupiah(bon.total)}</td>
 								<td>{formatRupiah(bon.sudahDibayar)}</td>
 								<td class="sisa">{formatRupiah(bon.sisa)}</td>

@@ -7,6 +7,7 @@
 	import { keranjangState, nextKeranjangIdAndIncrement } from '$lib/stores/keranjang.svelte';
 	import { manualSaja } from '$lib/scanner';
 	import type { Barang, ItemPenjualan } from '$lib/types';
+	import { formatRupiah } from '$lib/utils/format';
 
 	type LogEntry = { waktu: string; pesan: string };
 	type Struk = {
@@ -147,10 +148,6 @@
 		if (showInvoice) return;
 		keranjangState.activeId = id;
 		uangDibayar = '';
-	}
-
-	function formatRupiah(n: number) {
-		return 'Rp' + n.toLocaleString('id-ID');
 	}
 
 	async function prosesKode(kode: string) {

@@ -1,5 +1,6 @@
 import { getDb } from './index';
 import type { ItemPenjualan, Penjualan } from '$lib/types';
+import type { Periode } from '$lib/utils/periode';
 
 type PenjualanRow = {
 	id: number;
@@ -16,14 +17,21 @@ type ItemRow = {
 	jumlah: number;
 };
 
-export async function listPenjualan(): Promise<Penjualan[]> {
+/**
+ * Tanpa `periode`, mengembalikan seluruh riwayat (perilaku lama).
+ * Dengan `periode`, disaring pakai date(..., 'localtime') supaya batas harinya
+ * mengikuti jam mesin toko — kolom tanggal sendiri disimpan dalam UTC.
+ */
+export async function listPenjualan(periode?: Periode): Promise<Penjualan[]> {
 	const db = await getDb();
 
 	const penjualanRows = await db.select<PenjualanRow[]>(
 		`SELECT p.id, p.tanggal, u.nama AS kasir, p.total
 		 FROM penjualan p
 		 JOIN users u ON u.id = p.kasir_id
-		 ORDER BY p.tanggal DESC`
+		 ${periode ? "WHERE date(p.tanggal, 'localtime') BETWEEN $1 AND $2" : ''}
+		 ORDER BY p.tanggal DESC`,
+		periode ? [periode.dari, periode.sampai] : []
 	);
 
 	if (penjualanRows.length === 0) return [];

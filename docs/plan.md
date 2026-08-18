@@ -175,6 +175,20 @@ Remember: DO NOT write or edit any files yet. This is a read-only exploration an
 plan fase 16 ✅
 - di penjualan keranjang ini busa lebih dari satu gak, client ada request klo ada dua pembeli dan terkadang kita melayani ke dua nya terus misal 1 beli gula dan masih di ambil oleh pelayan 1 makan si kasih lanjut orang kedua dia beli permen karen dan mau bayar maka kasih nya langsung buat kerenjang untuk pembeli ke dua dan bayar tanpa keranjang pertama terhapus gitu bisa gak yah 
 
+plan fase 17 ✅
+oke pak terus laporan itu muncul cuman laporn smua nya saya ingin ada laporan hari ini itu fokus paling penting di mana cuman hari ini 24 jam baru dia reset lagi jadi spya orang tahu hari ini penjualan berapa gitu spya orang bisa buat target 
+
+terus laporang itu harus ada dasboard lah 
+
+di tab pertama itu dashboard ada laporan hari ini laporan penjualan secara bulanan dan keselurahn. ahh atau gini aja 
+
+buat kan dasbord grafik laporan penjualan dan bon 
+barang yang terjual apa aja 
+
+terus untuk laporan penjualan itu ada dua laporan penjalan hari ini dashboard nya khusus. dan laporan keseluruhan di mana laporan itu nanti kita filter pake date untuk bisa filr per hari ini minggu ini bulan ini dan tahun ini
+
+dan pake tap juga yah pisahkan penjualan keselurahn dan hari ini kerena itu penting banget 
+
 
 ## plan fix 
 plan fix 1 ✅
@@ -193,8 +207,12 @@ plan fix 3 ✅
 plan fix 4 ✅
 - pak saya ingin multi kerang ini akan ke hapus pada saat dia di bayar selesai klo misalnya kita di penjualan, terus tiba tiba kita ke product lalu kembali ke penjalan datanya tidak tersimpan nih termasuk keranjan kembali 1 nah ini jadi probleh dong
 
-plan fix 5 
+plan fix 5 ✅
 the probleh install di windows 7 ini 
+
+plan fix 6 
+tidak ada scroll di penjual keranjang jadi klo banyak banget dia tidak bisa scrolll dan itu jadi masalah ini di body nya yah 
+
 
 
 

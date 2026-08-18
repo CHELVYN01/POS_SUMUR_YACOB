@@ -1,5 +1,6 @@
 import { getDb } from './index';
 import type { ItemKasBon, KasBon, PembayaranKasBon } from '$lib/types';
+import type { Periode } from '$lib/utils/periode';
 
 type KasBonRow = {
 	id: number;
@@ -26,14 +27,17 @@ type PembayaranRow = {
 	jumlah: number;
 };
 
-export async function listKasBon(): Promise<KasBon[]> {
+/** Sama seperti listPenjualan: `periode` opsional, disaring pakai 'localtime'. */
+export async function listKasBon(periode?: Periode): Promise<KasBon[]> {
 	const db = await getDb();
 
 	const kasbonRows = await db.select<KasBonRow[]>(
 		`SELECT k.id, k.nama_pengutang, u.nama AS kasir, k.tanggal, k.jatuh_tempo, k.total, k.status
 		 FROM kasbon k
 		 JOIN users u ON u.id = k.kasir_id
-		 ORDER BY k.status ASC, k.tanggal DESC`
+		 ${periode ? "WHERE date(k.tanggal, 'localtime') BETWEEN $1 AND $2" : ''}
+		 ORDER BY k.status ASC, k.tanggal DESC`,
+		periode ? [periode.dari, periode.sampai] : []
 	);
 
 	if (kasbonRows.length === 0) return [];
