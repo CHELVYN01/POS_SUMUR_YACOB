@@ -215,8 +215,8 @@ tidak ada scroll di penjual keranjang jadi klo banyak banget dia tidak bisa scro
 - penyebab: .cart-table-wrap flex item tanpa min-height:0, jadi memanjang mengikuti isi (bukan menggulung) dan mendorong footer bayar keluar layar
 
 
-plan fix 7
-tiga hal, semuanya soal Daftar Produk & log:
+plan fix 7 ✅ (dicatat di list_done sebagai fix 14)
+empat hal, semuanya soal Daftar Produk & log:
 
 1. kolom cari di Produk harus tetap di tempat saat daftar digulung
    - sekarang kolom "Cari nama produk atau barcode..." ikut naik keluar layar, karena

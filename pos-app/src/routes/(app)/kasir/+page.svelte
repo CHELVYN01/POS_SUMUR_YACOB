@@ -1,15 +1,24 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { listBarang, cariBarangByBarcode, kurangiStokBarang } from '$lib/db/barang';
+	import {
+		listBarangTerlaris,
+		cariBarang,
+		cariBarangByBarcode,
+		cariStokHabis,
+		kurangiStokBarang
+	} from '$lib/db/barang';
+	import { catatLog as tulisLog, listLog, type LogAktivitas } from '$lib/db/log';
 	import { simpanPenjualan } from '$lib/db/penjualan';
 	import { currentUser } from '$lib/stores/session';
 	import { tandaiScan } from '$lib/stores/scanStatus';
 	import { keranjangState, nextKeranjangIdAndIncrement } from '$lib/stores/keranjang.svelte';
 	import { manualSaja } from '$lib/scanner';
 	import type { Barang, ItemPenjualan } from '$lib/types';
-	import { formatRupiah } from '$lib/utils/format';
+	import { formatRupiah, formatWaktu } from '$lib/utils/format';
 
-	type LogEntry = { waktu: string; pesan: string };
+	/** daftar pintasan di Kasir — bukan seluruh katalog, sisanya lewat pencarian */
+	const JUMLAH_TERLARIS = 30;
+
 	type Struk = {
 		nomor: string;
 		waktu: string;
@@ -21,19 +30,29 @@
 
 	let cari = $state('');
 	let scan = $state('');
-	let daftarBarang = $state<Barang[]>([]);
+	let daftarTerlaris = $state<Barang[]>([]);
+	let hasilCari = $state<Barang[]>([]);
+	let mencari = $state(false);
 	let membayar = $state(false);
 	let showInvoice = $state(false);
 	let uangDibayar = $state('');
 	let struk = $state<Struk | null>(null);
 	let showStokHabis = $state(false);
-	let log = $state<LogEntry[]>([]);
+	let log = $state<LogAktivitas[]>([]);
 	let scanInput = $state<HTMLInputElement | null>(null);
 	let uangInput = $state<HTMLInputElement | null>(null);
 
-	function catatLog(pesan: string) {
-		const waktu = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-		log = [{ waktu, pesan }, ...log].slice(0, 50);
+	async function muatLog() {
+		try {
+			log = await listLog('kasir');
+		} catch (e) {
+			console.error('Gagal memuat log:', e);
+		}
+	}
+
+	async function catatLog(pesan: string) {
+		await tulisLog('kasir', pesan, $currentUser);
+		await muatLog();
 	}
 
 	function refocusScan() {
@@ -43,8 +62,13 @@
 		if (!editable) scanInput?.focus();
 	}
 
+	async function muatTerlaris() {
+		daftarTerlaris = await listBarangTerlaris(JUMLAH_TERLARIS);
+	}
+
 	onMount(() => {
-		listBarang().then((data) => (daftarBarang = data));
+		muatTerlaris();
+		muatLog();
 
 		const handler = () => setTimeout(refocusScan, 50);
 		document.addEventListener('focusout', handler);
@@ -56,9 +80,41 @@
 		};
 	});
 
-	let barangFiltered = $derived(
-		daftarBarang.filter((b) => b.nama.toLowerCase().includes(cari.trim().toLowerCase()))
-	);
+	/**
+	 * Pencarian dijalankan di SQL supaya menjangkau SELURUH katalog, bukan cuma
+	 * menyaring 30 terlaris yang tampil — kalau begitu, produk di luar 30 teratas
+	 * mustahil ditemukan kasir. Diberi jeda singkat supaya tiap ketikan tidak
+	 * langsung jadi satu query.
+	 */
+	$effect(() => {
+		const kata = cari.trim();
+		if (!kata) {
+			hasilCari = [];
+			mencari = false;
+			return;
+		}
+
+		let dibatalkan = false;
+		mencari = true;
+		const timer = setTimeout(async () => {
+			try {
+				const hasil = await cariBarang(kata);
+				if (!dibatalkan) hasilCari = hasil;
+			} catch (e) {
+				console.error('Pencarian produk gagal:', e);
+			} finally {
+				if (!dibatalkan) mencari = false;
+			}
+		}, 180);
+
+		return () => {
+			dibatalkan = true;
+			clearTimeout(timer);
+		};
+	});
+
+	let sedangCari = $derived(cari.trim().length > 0);
+	let barangTampil = $derived(sedangCari ? hasilCari : daftarTerlaris);
 
 	let activeKeranjang = $derived(keranjangState.list.find((k) => k.id === keranjangState.activeId)!);
 	let cart = $derived(activeKeranjang.cart);
@@ -67,9 +123,6 @@
 	let uangDibayarNum = $derived(Number(uangDibayar) || 0);
 	let kembalian = $derived(uangDibayarNum - total);
 	let bayarValid = $derived(uangDibayarNum >= total);
-	let adaStokHabis = $derived(
-		cart.some((item) => daftarBarang.find((b) => b.id === item.barangId)?.qty === 0)
-	);
 
 	function tambah(barang: Barang) {
 		const existing = activeKeranjang.cart.find((c) => c.barangId === barang.id);
@@ -156,7 +209,9 @@
 
 		let barang = await cariBarangByBarcode(kunci);
 		if (!barang) {
-			barang = daftarBarang.find((b) => b.nama.toLowerCase() === kunci.toLowerCase()) ?? null;
+			// bukan barcode — coba nama persis, dicari ke seluruh katalog lewat SQL
+			const kandidat = await cariBarang(kunci, 5);
+			barang = kandidat.find((b) => b.nama.toLowerCase() === kunci.toLowerCase()) ?? null;
 		}
 		if (barang) {
 			tambah(barang);
@@ -207,10 +262,21 @@
 		klikBayar();
 	}
 
-	function klikBayar() {
-		if (adaStokHabis) {
-			showStokHabis = true;
-			return;
+	/**
+	 * Stok ditanyakan ke DB, bukan dibaca dari daftar yang tampil — daftar itu
+	 * sekarang cuma 30 terlaris, jadi produk keranjang bisa saja tidak ada di sana.
+	 */
+	async function klikBayar() {
+		if (cart.length === 0) return;
+		try {
+			const habis = await cariStokHabis(cart.map((item) => item.barangId));
+			if (habis.length > 0) {
+				showStokHabis = true;
+				return;
+			}
+		} catch (e) {
+			// gagal memeriksa stok jangan sampai menghalangi pembayaran
+			console.error('Gagal memeriksa stok:', e);
 		}
 		bayar();
 	}
@@ -232,8 +298,9 @@
 
 			const penjualanId = await simpanPenjualan($currentUser.id, cart);
 			await kurangiStokBarang(cart.map((item) => ({ barangId: item.barangId, jumlah: item.jumlah })));
-			daftarBarang = await listBarang();
-			catatLog(
+			// stok & peringkat terlaris ikut berubah setelah transaksi
+			await muatTerlaris();
+			await catatLog(
 				`[${namaKeranjang}] Bayar — total ${formatRupiah(totalBayar)}, kembalian ${formatRupiah(kembalianAkhir)}`
 			);
 
@@ -404,8 +471,16 @@
 
 	<div class="side-col">
 		<section class="panel list-panel card">
-			<h1>Daftar Produk</h1>
-			<input class="search" placeholder="Cari produk..." bind:value={cari} use:manualSaja={alihkanScan} />
+			<div class="list-head">
+				<h1>Daftar Produk</h1>
+				<span class="list-ket">{sedangCari ? 'Hasil pencarian' : `${JUMLAH_TERLARIS} terlaris`}</span>
+			</div>
+			<input
+				class="search"
+				placeholder="Cari nama produk atau barcode..."
+				bind:value={cari}
+				use:manualSaja={alihkanScan}
+			/>
 
 			<div class="list-table-wrap">
 				<table>
@@ -416,7 +491,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each barangFiltered as barang (barang.id)}
+						{#each barangTampil as barang (barang.id)}
 							<tr
 								class="row-tambah"
 								role="button"
@@ -429,8 +504,18 @@
 								<td>{formatRupiah(barang.harga)}</td>
 							</tr>
 						{/each}
-						{#if barangFiltered.length === 0}
-							<tr><td colspan="2" class="empty">Produk tidak ditemukan</td></tr>
+						{#if barangTampil.length === 0}
+							<tr>
+								<td colspan="2" class="empty">
+									{#if mencari}
+										Mencari...
+									{:else if sedangCari}
+										Produk tidak ditemukan
+									{:else}
+										Belum ada produk
+									{/if}
+								</td>
+							</tr>
 						{/if}
 					</tbody>
 				</table>
@@ -438,15 +523,21 @@
 		</section>
 
 		<section class="panel log-panel card">
-			<h2>Log Aktivitas</h2>
+			<div class="list-head">
+				<h2>Log Aktivitas</h2>
+				<span class="list-ket">24 jam terakhir</span>
+			</div>
 			<div class="log-list">
 				{#if log.length === 0}
 					<p class="empty">Belum ada aktivitas</p>
 				{:else}
-					{#each log as entry, i (i)}
+					{#each log as entry (entry.id)}
 						<div class="log-entry">
-							<span class="log-time">{entry.waktu}</span>
-							<span class="log-msg">{entry.pesan}</span>
+							<span class="log-time">{formatWaktu(entry.waktu)}</span>
+							<span class="log-msg">
+								{entry.pesan}
+								{#if entry.userNama}<span class="log-user">· {entry.userNama}</span>{/if}
+							</span>
 						</div>
 					{/each}
 				{/if}
@@ -746,6 +837,24 @@
 		font-size: 1.1rem;
 	}
 
+	.list-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+
+	.list-head h1,
+	.list-head h2 {
+		margin-bottom: 0.5rem;
+	}
+
+	.list-ket {
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		flex-shrink: 0;
+	}
+
 	.search {
 		width: 100%;
 		margin-bottom: 1rem;
@@ -823,6 +932,11 @@
 
 	.log-msg {
 		color: var(--text);
+	}
+
+	.log-user {
+		color: var(--text-muted);
+		white-space: nowrap;
 	}
 
 	.invoice-overlay {

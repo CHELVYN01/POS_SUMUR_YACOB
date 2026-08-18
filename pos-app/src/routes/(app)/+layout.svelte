@@ -8,6 +8,7 @@
 	import { tokoInfo } from '$lib/stores/toko';
 	import { getDb } from '$lib/db';
 	import { runAutoBackupIfDue } from '$lib/db-manager';
+	import { hapusLogKedaluwarsa } from '$lib/db/log';
 	import Toast from '$lib/components/Toast.svelte';
 
 	let { children } = $props();
@@ -24,6 +25,14 @@
 				await runAutoBackupIfDue();
 			} catch (e) {
 				console.error('Auto-backup gagal:', e);
+			}
+
+			// Retensi log aktivitas 24 jam. Dipisah dari blok auto-backup supaya
+			// backup yang gagal tidak ikut membatalkan pembersihan log.
+			try {
+				await hapusLogKedaluwarsa();
+			} catch (e) {
+				console.error('Pembersihan log gagal:', e);
 			}
 		})();
 
