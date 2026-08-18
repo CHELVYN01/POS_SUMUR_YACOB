@@ -269,10 +269,10 @@
 	.app-meta {
 		display: flex;
 		align-items: center;
-		justify-content: center;
 		flex-wrap: wrap;
 		gap: 0.3rem;
-		padding-top: 0.7rem;
+		/* ikut rata kiri dengan Pengaturan & nama user, biar satu garis lurus */
+		padding: 0.7rem 0.75rem 0 0.75rem;
 		border-top: 1px solid var(--border);
 		font-size: 0.72rem;
 		color: var(--text-muted);
@@ -283,14 +283,15 @@
 		font-weight: 600;
 	}
 
+	/* Rata kiri seperti menu di atasnya, dan padding kirinya dalam rem — bukan em —
+	   supaya sejajar persis dengan nama user di bawahnya yang ukuran fontnya beda. */
 	.settings-link {
 		display: flex;
 		align-items: center;
-		justify-content: center;
 		gap: 0.6rem;
 		text-decoration: none;
 		color: var(--text);
-		padding: 0.6em 0.75em;
+		padding: 0.6em 0.75rem;
 		border-radius: var(--radius);
 		font-size: 0.9rem;
 		border-top: 1px solid var(--border);
@@ -308,7 +309,7 @@
 	}
 
 	.user {
-		padding: 0 0.5rem;
+		padding: 0 0.75rem;
 	}
 
 	.user-name {
