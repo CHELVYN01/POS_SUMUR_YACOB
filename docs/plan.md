@@ -267,6 +267,16 @@ empat hal, semuanya soal Daftar Produk & log:
 
 
 
+plan fix 8 ✅ (dicatat di list_done sebagai fix 17)
+- klo ada salah satu product di stock nya kosong yah di pop lah
+- pada saat dia memilih product tersebut klo stock kosong dan dia mau masukin ke dalam chart
+  ada pop itu. itu lebih bagus
+- jadi peringatan stok habis tidak lagi menunggu tombol Bayar ditekan: muncul saat produknya
+  dipilih/di-scan, sekali per produk per keranjang
+- popup saat Bayar tetap ada sebagai jaring pengaman, tapi hanya untuk produk yang stoknya
+  baru habis setelah masuk keranjang (mis. terjual lewat keranjang lain)
+
+
 ## wajib saya running sendiri 
 
 

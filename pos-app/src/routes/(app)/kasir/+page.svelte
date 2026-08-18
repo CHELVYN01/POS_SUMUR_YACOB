@@ -38,6 +38,10 @@
 	let uangDibayar = $state('');
 	let struk = $state<Struk | null>(null);
 	let showStokHabis = $state(false);
+	/** produk stok habis yang sedang ditanyakan sebelum masuk keranjang */
+	let konfirmStok = $state<Barang | null>(null);
+	/** `keranjangId:barangId` yang stok habisnya sudah disetujui kasir */
+	let stokDisetujui = $state<string[]>([]);
 	let log = $state<LogAktivitas[]>([]);
 	let scanInput = $state<HTMLInputElement | null>(null);
 	let uangInput = $state<HTMLInputElement | null>(null);
@@ -56,7 +60,9 @@
 	}
 
 	function refocusScan() {
-		if (showInvoice) return;
+		// jangan tarik fokus balik selagi ada popup — scan berikutnya harus menunggu
+		// kasir menjawab dulu, bukan diam-diam menambah barang di belakang popup
+		if (showInvoice || konfirmStok) return;
 		const active = document.activeElement;
 		const editable = active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA';
 		if (!editable) scanInput?.focus();
@@ -124,7 +130,28 @@
 	let kembalian = $derived(uangDibayarNum - total);
 	let bayarValid = $derived(uangDibayarNum >= total);
 
+	/** kunci persetujuan stok habis, per keranjang — keranjang lain tanya lagi */
+	function kunciStok(barangId: number, keranjangId = keranjangState.activeId) {
+		return `${keranjangId}:${barangId}`;
+	}
+
+	/**
+	 * Peringatan stok habis muncul di sini, saat produknya dipilih — bukan menunggu
+	 * sampai kasir menekan Bayar. Pembeli masih di depan meja, jadi masih sempat
+	 * diberi tahu barangnya kosong sebelum keranjangnya terlanjur panjang.
+	 *
+	 * Ditanya sekali saja per produk per keranjang; menambah jumlah produk yang
+	 * sudah disetujui tidak memunculkannya lagi.
+	 */
 	function tambah(barang: Barang) {
+		if (barang.qty === 0 && !stokDisetujui.includes(kunciStok(barang.id))) {
+			konfirmStok = barang;
+			return;
+		}
+		masukKeranjang(barang);
+	}
+
+	function masukKeranjang(barang: Barang, stokHabis = false) {
 		const existing = activeKeranjang.cart.find((c) => c.barangId === barang.id);
 		if (existing) {
 			existing.jumlah += 1;
@@ -136,7 +163,9 @@
 				jumlah: 1
 			});
 		}
-		catatLog(`[${activeKeranjang.nama}] Tambah ${barang.nama} x1`);
+		catatLog(
+			`[${activeKeranjang.nama}] Tambah ${barang.nama} x1${stokHabis ? ' (stok habis, dilanjutkan)' : ''}`
+		);
 	}
 
 	/** baris daftar produk berperan sebagai tombol, jadi Enter/Spasi harus ikut menambah */
@@ -187,6 +216,8 @@
 	function tutupKeranjang(id: number) {
 		if (showInvoice) return;
 		keranjangState.list = keranjangState.list.filter((k) => k.id !== id);
+		// persetujuan stok habis ikut hangus bersama keranjangnya
+		stokDisetujui = stokDisetujui.filter((k) => !k.startsWith(`${id}:`));
 		uangDibayar = '';
 		if (keranjangState.list.length === 0) {
 			const newId = nextKeranjangIdAndIncrement();
@@ -205,7 +236,7 @@
 
 	async function prosesKode(kode: string) {
 		const kunci = kode.trim();
-		if (!kunci) return;
+		if (!kunci || konfirmStok) return;
 
 		let barang = await cariBarangByBarcode(kunci);
 		if (!barang) {
@@ -227,7 +258,7 @@
 
 	/** scanner nembak ke kolom lain — tarik balik ke kolom scan */
 	function alihkanScan(kode: string) {
-		if (showInvoice) return;
+		if (showInvoice || konfirmStok) return;
 		scanInput?.focus();
 		prosesKode(kode);
 	}
@@ -270,7 +301,11 @@
 		if (cart.length === 0) return;
 		try {
 			const habis = await cariStokHabis(cart.map((item) => item.barangId));
-			if (habis.length > 0) {
+			// Yang sudah ditanyakan saat masuk keranjang tidak ditanya dua kali. Sisanya
+			// tetap dicegat di sini: stok bisa habis setelah produknya masuk keranjang,
+			// mis. dijual lewat keranjang lain atau diubah dari halaman Produk.
+			const belumDisetujui = habis.filter((id) => !stokDisetujui.includes(kunciStok(id)));
+			if (belumDisetujui.length > 0) {
 				showStokHabis = true;
 				return;
 			}
@@ -284,6 +319,20 @@
 	function lanjutkanMeskiStokHabis() {
 		showStokHabis = false;
 		bayar();
+	}
+
+	function setujuiStokHabis() {
+		const barang = konfirmStok;
+		if (!barang) return;
+		stokDisetujui.push(kunciStok(barang.id));
+		konfirmStok = null;
+		masukKeranjang(barang, true);
+		refocusScan();
+	}
+
+	function batalkanStokHabis() {
+		konfirmStok = null;
+		refocusScan();
 	}
 
 	async function bayar() {
@@ -586,6 +635,21 @@
 
 			<div class="invoice-actions">
 				<button class="primary" onclick={tutupInvoice}>Selesai</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if konfirmStok}
+	<div class="invoice-overlay" role="presentation">
+		<div class="stok-warning-card card">
+			<h2>Stok Habis</h2>
+			<p>
+				Stok <strong>{konfirmStok.nama}</strong> sudah 0. Tetap masukkan ke keranjang?
+			</p>
+			<div class="invoice-actions">
+				<button onclick={batalkanStokHabis}>Batal</button>
+				<button class="primary" onclick={setujuiStokHabis}>Tetap Tambahkan</button>
 			</div>
 		</div>
 	</div>
