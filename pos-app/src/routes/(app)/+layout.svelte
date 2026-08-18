@@ -9,6 +9,7 @@
 	import { getDb } from '$lib/db';
 	import { runAutoBackupIfDue } from '$lib/db-manager';
 	import { hapusLogKedaluwarsa } from '$lib/db/log';
+	import { APP_VERSION, APP_AUTHOR } from '$lib/buildInfo';
 	import Toast from '$lib/components/Toast.svelte';
 
 	let { children } = $props();
@@ -109,6 +110,14 @@
 				</div>
 			{/if}
 			<button onclick={logout}>Keluar</button>
+
+			<!-- Versi sengaja ditaruh di sini supaya sekali lihat ketahuan build mana yang
+			     terpasang di mesin client, tanpa perlu membuka Pengaturan dulu. -->
+			<div class="app-meta">
+				<span class="app-versi">v{APP_VERSION}</span>
+				<span aria-hidden="true">·</span>
+				<span>oleh {APP_AUTHOR}</span>
+			</div>
 		</div>
 	</aside>
 
@@ -255,6 +264,23 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.6rem;
+	}
+
+	.app-meta {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		padding-top: 0.7rem;
+		border-top: 1px solid var(--border);
+		font-size: 0.72rem;
+		color: var(--text-muted);
+	}
+
+	.app-versi {
+		font-variant-numeric: tabular-nums;
+		font-weight: 600;
 	}
 
 	.settings-link {

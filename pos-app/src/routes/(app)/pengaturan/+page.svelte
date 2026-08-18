@@ -5,7 +5,7 @@
 	import { tokoInfo } from '$lib/stores/toko';
 	import { setMasterPassword, getAutoBackupDir, setAutoBackupDir } from '$lib/db-manager';
 	import { open } from '@tauri-apps/plugin-dialog';
-	import { BUILD_DATE, BUILD_COMMIT } from '$lib/buildInfo';
+	import { BUILD_DATE, BUILD_COMMIT, APP_VERSION, APP_AUTHOR } from '$lib/buildInfo';
 	import type { User } from '$lib/types';
 
 	let users = $state<User[]>([]);
@@ -208,11 +208,12 @@
 		<section class="card section">
 			<h2>Versi Aplikasi</h2>
 			<div class="me">
-				<div class="me-name">{BUILD_DATE}</div>
-				<div class="me-meta">commit {BUILD_COMMIT}</div>
+				<div class="me-name">v{APP_VERSION}</div>
+				<div class="me-meta">{BUILD_DATE} · commit {BUILD_COMMIT}</div>
+				<div class="me-meta">Dibuat oleh {APP_AUTHOR}</div>
 			</div>
 			<p class="muted">
-				Sebutkan dua baris ini kalau melaporkan masalah — dari sini ketahuan installer versi
+				Sebutkan baris-baris ini kalau melaporkan masalah — dari sini ketahuan installer versi
 				mana yang sedang terpasang.
 			</p>
 		</section>

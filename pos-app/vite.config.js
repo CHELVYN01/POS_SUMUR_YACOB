@@ -1,12 +1,25 @@
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
+// @ts-expect-error node:fs adalah modul nodejs, proyek ini tidak memasang @types/node
+import { readFileSync } from "node:fs";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
+// Nomor versi diambil dari package.json — satu dari empat tempat yang selalu
+// dinaikkan bersamaan tiap rilis (lihat CLAUDE.md), jadi nilainya sama dengan
+// versi installer di tauri.conf.json.
+const pkg = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
+);
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [sveltekit()],
+
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
