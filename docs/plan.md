@@ -210,8 +210,51 @@ plan fix 4 ✅
 plan fix 5 ✅
 the probleh install di windows 7 ini 
 
-plan fix 6 
+plan fix 6 ✅ (dicatat di list_done sebagai fix 13 — nomor fix 6 di sana sudah dipakai installer WebView2)
 tidak ada scroll di penjual keranjang jadi klo banyak banget dia tidak bisa scrolll dan itu jadi masalah ini di body nya yah 
+- penyebab: .cart-table-wrap flex item tanpa min-height:0, jadi memanjang mengikuti isi (bukan menggulung) dan mendorong footer bayar keluar layar
+
+
+plan fix 7
+tiga hal, semuanya soal Daftar Produk & log:
+
+1. kolom cari di Produk harus tetap di tempat saat daftar digulung
+   - sekarang kolom "Cari nama produk atau barcode..." ikut naik keluar layar, karena
+     halaman Produk tidak punya kotak scroll sendiri — yang menggulung .content di layout
+     (beda dengan Kasir yang tabelnya menggulung di dalam kotak)
+   - yang dikunci: judul "Daftar Produk" + jumlah produk + kolom cari + header tabel
+     (Nama Produk/Barcode/Harga/Stok), semuanya sticky ke atas area konten
+
+2. log Penjualan & Produk disimpan, tidak hilang saat pindah halaman
+   - sekarang log cuma `$state` di memori tiap halaman, begitu pindah menu langsung kosong
+   - simpan ke SQLite: migration baru 0004_log_aktivitas.sql
+     (id, halaman, pesan, user_id, waktu) + index di kolom waktu
+   - retensi 24 jam, hapus sendiri: DELETE WHERE waktu < datetime('now','-24 hours'),
+     dijalankan sekali saat app dibuka (numpang alur runAutoBackupIfDue di (app)/+layout)
+   - waktu ditulis & dibaca konsisten UTC lalu ditampilkan localtime — jangan ulangi bug
+     tanggal yang baru dibetulkan di fase 17
+   - helper baru src/lib/db/log.ts, dipakai bareng Kasir & Produk (catatLog sekarang
+     di-copy di dua halaman)
+
+3. pagination Daftar Produk, 100 baris per halaman
+   - tujuannya biar ringan — sekarang listBarang() menarik semua produk lalu difilter di JS,
+     makin banyak produk makin berat render tabelnya
+   - pencarian + hitung total + LIMIT/OFFSET dipindah ke SQL, bukan slice di JS
+     (sejalan dengan fase 17 yang sudah memindah agregat laporan ke SQL)
+   - navigasi: Sebelumnya / Berikutnya + keterangan "1-100 dari N produk"
+   - halaman balik ke 1 tiap kata kunci cari berubah
+
+4. Daftar Produk di halaman Kasir: bukan pagination, tapi 30 terlaris + search kuat
+   - daftar product di penjualan juga buat 30 product saja kita lebih kuat di search nya jadi pada saat
+     search kita dia langsung muncul ini nah tapi jangan muncul semua product 30 product teratas paling
+     banyak di beli saja gitu di keranjangan scan barcode dan ketik nama product. itu kita bisa search
+     product atau nomor barcode dari situ init juga penting banget
+   - jadi: default tampilkan 30 produk terlaris (dihitung dari item_penjualan, bukan urutan abjad),
+     bukan semua produk — ini yang bikin ringan
+   - begitu kolom cari diisi, pencarian jalan ke SELURUH produk lewat SQL (nama ATAU barcode),
+     bukan cuma menyaring 30 yang tampil — kalau tidak, produk di luar 30 teratas mustahil ketemu
+   - kolom scan barcode di keranjang tetap seperti sekarang (scan → langsung masuk keranjang);
+     yang diperkuat adalah kolom "Cari produk..." supaya bisa dicari pakai nama maupun nomor barcode
 
 
 
