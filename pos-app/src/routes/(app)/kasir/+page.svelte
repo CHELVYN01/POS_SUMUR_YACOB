@@ -537,6 +537,7 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+		min-height: 0;
 	}
 
 	.tab-row {
@@ -607,7 +608,20 @@
 
 	.cart-table-wrap {
 		flex: 1;
+		/* Tanpa min-height:0 flex item tidak boleh menyusut di bawah tinggi isinya,
+		   jadi daftar keranjang yang panjang memanjangkan kotaknya (bukan menggulung)
+		   dan mendorong .cart-footer — Total, Uang Dibayar, tombol Bayar — keluar
+		   layar, lalu terpotong .kasir { overflow: hidden }. */
+		min-height: 0;
 		overflow-y: auto;
+	}
+
+	/* header tabel tetap terlihat saat daftar keranjang digulung */
+	.cart-table-wrap th {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		background: var(--surface);
 	}
 
 	.empty {
@@ -632,6 +646,8 @@
 
 	.cart-footer {
 		margin-top: auto;
+		/* jangan ikut menyusut saat keranjang penuh — ini bagian yang wajib terlihat */
+		flex-shrink: 0;
 		border-top: 1px solid var(--border);
 		padding-top: 0.9rem;
 	}
@@ -737,7 +753,15 @@
 
 	.list-table-wrap {
 		flex: 1;
+		min-height: 0;
 		overflow-y: auto;
+	}
+
+	.list-table-wrap th {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		background: var(--surface);
 	}
 
 	.row-tambah {
@@ -772,6 +796,7 @@
 
 	.log-list {
 		flex: 1;
+		min-height: 0;
 		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
