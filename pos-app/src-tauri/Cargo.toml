@@ -34,6 +34,7 @@ dirs = "5"
 # tauri-plugin-sql mount. Versi sqlx harus sama dengan yang dipakai plugin.
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
 sha2 = "0.10"
+keepawake = "0.6"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

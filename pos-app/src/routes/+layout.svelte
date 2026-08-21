@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import '../app.css';
+	import { mulaiTahanLayar } from '$lib/keepAwake';
 	let { children } = $props();
 
 	onMount(() => {
+		const lepasTahanLayar = mulaiTahanLayar();
+
 		async function toggleFullscreen(event: KeyboardEvent) {
 			if (event.key === 'Escape') {
 				event.preventDefault();
@@ -21,6 +24,7 @@
 		window.addEventListener('keydown', toggleFullscreen);
 		return () => {
 			window.removeEventListener('keydown', toggleFullscreen);
+			lepasTahanLayar();
 		};
 	});
 </script>

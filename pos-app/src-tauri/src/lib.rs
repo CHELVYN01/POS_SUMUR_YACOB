@@ -1,6 +1,7 @@
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 mod db_manager;
+mod keep_awake;
 
 fn migrations() -> Vec<Migration> {
     vec![
@@ -36,6 +37,11 @@ pub fn run() {
     db_manager::apply_pending_db_swap_if_any();
     // Urutannya penting: swap dulu (file bisa berganti), baru periksa checksum file final.
     db_manager::repair_legacy_migration_checksums();
+
+    // Layar kasir tidak boleh mati selama aplikasi berjalan (fase 19).
+    // Penahannya harus tetap hidup selama app hidup, jadi dipegang di sini —
+    // run() di bawah memblokir sampai aplikasi ditutup, lalu penahannya dilepas.
+    let _penahan_layar = keep_awake::start();
 
     tauri::Builder::default()
         .plugin(
