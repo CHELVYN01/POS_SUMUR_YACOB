@@ -1,5 +1,7 @@
 import { getDb } from './index';
 import type { Barang } from '$lib/types';
+import type { BarisProduk, ErrorBaris } from '$lib/export/produk';
+import { formatRupiah } from '$lib/utils/format';
 
 type BarangRow = {
 	id: number;
@@ -167,4 +169,131 @@ export async function kurangiStokBarang(items: { barangId: number; jumlah: numbe
 			[item.jumlah, item.barangId]
 		);
 	}
+}
+
+// --- Import produk dari Excel -------------------------------------------------
+
+export type PerubahanBarang = {
+	baris: BarisProduk;
+	sebelum: Barang;
+	/** ringkasan "harga: Rp1.000 → Rp1.200" untuk ditampilkan di pratinjau */
+	perubahan: string[];
+};
+
+export type RencanaImport = {
+	baru: BarisProduk[];
+	ubah: PerubahanBarang[];
+	/** baris yang isinya persis sama dengan yang di database — tidak perlu ditulis ulang */
+	sama: number;
+	error: ErrorBaris[];
+};
+
+function bedaProduk(sebelum: Barang, baris: BarisProduk): string[] {
+	const perubahan: string[] = [];
+	if (sebelum.nama !== baris.nama) perubahan.push(`nama: "${sebelum.nama}" → "${baris.nama}"`);
+	if (sebelum.harga !== baris.harga) {
+		perubahan.push(`harga: ${formatRupiah(sebelum.harga)} → ${formatRupiah(baris.harga)}`);
+	}
+	if (sebelum.qty !== baris.qty) {
+		perubahan.push(`stok: ${sebelum.qty ?? '-'} → ${baris.qty ?? '-'}`);
+	}
+	if ((sebelum.barcode ?? '') !== baris.barcode) {
+		perubahan.push(`barcode: ${sebelum.barcode ?? '-'} → ${baris.barcode}`);
+	}
+	return perubahan;
+}
+
+/**
+ * Mencocokkan baris Excel dengan produk yang ada, tanpa menulis apa pun — hasilnya
+ * dipakai untuk pratinjau supaya user melihat dulu apa yang akan berubah.
+ *
+ * Pencocokan pakai ID lebih dulu, lalu barcode. ID yang tidak ketemu TIDAK dianggap
+ * error melainkan jatuh ke pencocokan barcode: file backup dari mesin lain punya
+ * urutan ID yang berbeda, dan menolak semua barisnya akan bikin fitur ini tak berguna
+ * justru di kasus yang paling membutuhkannya.
+ *
+ * Produk yang barisnya tidak ada di file dibiarkan apa adanya — import hanya
+ * menambah dan mengubah, tidak pernah menghapus.
+ */
+export async function siapkanImportBarang(
+	baris: BarisProduk[],
+	errorParse: ErrorBaris[] = []
+): Promise<RencanaImport> {
+	const semua = await listBarang();
+	const byId = new Map(semua.map((b) => [b.id, b]));
+	const byBarcode = new Map(semua.filter((b) => b.barcode).map((b) => [b.barcode as string, b]));
+
+	const rencana: RencanaImport = { baru: [], ubah: [], sama: 0, error: [...errorParse] };
+
+	for (const b of baris) {
+		const target = (b.id !== null ? byId.get(b.id) : undefined) ?? byBarcode.get(b.barcode);
+
+		if (!target) {
+			rencana.baru.push(b);
+			continue;
+		}
+
+		// barcode UNIQUE di database: kalau baris ini mau memakai barcode milik produk
+		// lain, INSERT/UPDATE-nya pasti gagal — lebih baik ditolak di sini dengan pesan
+		// yang menyebut produknya daripada muncul sebagai error SQLite mentah
+		const pemilik = byBarcode.get(b.barcode);
+		if (pemilik && pemilik.id !== target.id) {
+			rencana.error.push({
+				baris: b.baris,
+				pesan: `barcode ${b.barcode} sudah dipakai produk "${pemilik.nama}"`
+			});
+			continue;
+		}
+
+		const perubahan = bedaProduk(target, b);
+		if (perubahan.length === 0) rencana.sama += 1;
+		else rencana.ubah.push({ baris: b, sebelum: target, perubahan });
+	}
+
+	return rencana;
+}
+
+export type HasilImport = { baru: number; ubah: number; gagal: ErrorBaris[] };
+
+/**
+ * Menjalankan rencana. Update dulu baru insert: kalau ada barcode yang berpindah
+ * antar produk, pelepasannya harus terjadi sebelum ada yang memakainya.
+ *
+ * Kegagalan per baris dikumpulkan, bukan menghentikan sisanya — pada file berisi
+ * ratusan baris, satu baris bermasalah tidak boleh membatalkan yang lain
+ * (tidak ada transaksi tunggal di sini karena tauri-plugin-sql memakai pool koneksi,
+ * BEGIN/COMMIT tidak dijamin mendarat di koneksi yang sama).
+ */
+export async function terapkanImportBarang(rencana: RencanaImport): Promise<HasilImport> {
+	const hasil: HasilImport = { baru: 0, ubah: 0, gagal: [] };
+
+	for (const u of rencana.ubah) {
+		try {
+			await updateBarang(u.sebelum.id, {
+				nama: u.baris.nama,
+				harga: u.baris.harga,
+				qty: u.baris.qty,
+				barcode: u.baris.barcode
+			});
+			hasil.ubah += 1;
+		} catch (e) {
+			console.error('Gagal mengubah produk saat import:', e);
+			hasil.gagal.push({ baris: u.baris.baris, pesan: `gagal mengubah "${u.baris.nama}"` });
+		}
+	}
+
+	for (const b of rencana.baru) {
+		try {
+			await tambahBarang({ nama: b.nama, harga: b.harga, qty: b.qty, barcode: b.barcode });
+			hasil.baru += 1;
+		} catch (e) {
+			console.error('Gagal menambah produk saat import:', e);
+			const pesan = String(e).includes('UNIQUE')
+				? `barcode ${b.barcode} sudah dipakai produk lain`
+				: `gagal menambah "${b.nama}"`;
+			hasil.gagal.push({ baris: b.baris, pesan });
+		}
+	}
+
+	return hasil;
 }

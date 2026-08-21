@@ -18,6 +18,7 @@
     "sql:allow-execute",
     "dialog:allow-save",
     "dialog:allow-open",
+    "fs:allow-read-file",
     "fs:allow-write-file",
     "process:allow-restart"
   ]

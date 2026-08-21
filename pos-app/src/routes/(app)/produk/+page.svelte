@@ -1,13 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
+		listBarang,
 		listBarangHalaman,
 		hitungBarang,
 		tambahBarang,
 		updateBarang,
 		hapusBarang,
-		cariBarangByBarcode
+		cariBarangByBarcode,
+		siapkanImportBarang,
+		terapkanImportBarang,
+		type RencanaImport
 	} from '$lib/db/barang';
+	import { exportProdukExcel, bacaProdukExcel, ImportError } from '$lib/export/produk';
 	import { catatLog as tulisLog, listLog, type LogAktivitas } from '$lib/db/log';
 	import { currentUser } from '$lib/stores/session';
 	import { manualSaja } from '$lib/scanner';
@@ -128,6 +133,9 @@
 	}
 
 	function refocusBarcode() {
+		// selagi pratinjau import terbuka, kolom barcode ada di belakang overlay —
+		// menariknya kembali fokus bikin ketikan/scan mendarat di kolom yang tak terlihat
+		if (rencana !== null) return;
 		const formKosong = editId === null && !barcode && !nama && harga === undefined && qty === undefined;
 		if (!formKosong) return;
 
@@ -345,6 +353,106 @@
 		if (editId === id) resetForm();
 	}
 
+	let sedangExport = $state(false);
+	let sedangImport = $state(false);
+	let rencana = $state<RencanaImport | null>(null);
+	let namaFileImport = $state('');
+	let sedangTerapkan = $state(false);
+
+	let totalPerubahan = $derived(rencana ? rencana.baru.length + rencana.ubah.length : 0);
+
+	async function jalankanExport() {
+		if (sedangExport) return;
+		sedangExport = true;
+		try {
+			// sengaja seluruh katalog, bukan halaman/hasil pencarian yang sedang tampil:
+			// file ini dipakai untuk memperbaiki data, jadi harus utuh
+			const semua = await listBarang();
+			if (semua.length === 0) {
+				toast.info('Belum ada produk untuk di-export');
+				return;
+			}
+			if (await exportProdukExcel(semua)) {
+				toast.sukses(`${semua.length} produk di-export ke Excel`);
+				catatLog(`Export ${semua.length} produk ke Excel`);
+			}
+		} catch (e) {
+			console.error('Gagal export produk:', e);
+			toast.error('Gagal menyimpan file Excel');
+		} finally {
+			sedangExport = false;
+		}
+	}
+
+	async function jalankanImport() {
+		if (sedangImport) return;
+		sedangImport = true;
+		try {
+			const hasil = await bacaProdukExcel();
+			if (!hasil) return; // dialog ditutup user
+
+			const r = await siapkanImportBarang(hasil.baris, hasil.error);
+			if (r.baru.length === 0 && r.ubah.length === 0 && r.error.length === 0) {
+				toast.info(
+					r.sama > 0
+						? `Tidak ada yang berubah — ${r.sama} produk di file sudah sama dengan data di aplikasi`
+						: 'File tidak berisi baris produk'
+				);
+				return;
+			}
+
+			namaFileImport = hasil.namaFile;
+			rencana = r;
+		} catch (e) {
+			console.error('Gagal membaca file import:', e);
+			toast.error(e instanceof ImportError ? e.message : 'Gagal membaca file Excel');
+		} finally {
+			sedangImport = false;
+		}
+	}
+
+	async function terapkanImport() {
+		if (!rencana || sedangTerapkan) return;
+		sedangTerapkan = true;
+		try {
+			const hasil = await terapkanImportBarang(rencana);
+			rencana = null;
+
+			const bagian: string[] = [];
+			if (hasil.baru > 0) bagian.push(`${hasil.baru} produk baru`);
+			if (hasil.ubah > 0) bagian.push(`${hasil.ubah} produk diubah`);
+			const ringkas = bagian.join(', ') || 'tidak ada perubahan';
+
+			if (hasil.gagal.length > 0) {
+				toast.error(`Import selesai sebagian: ${ringkas}, ${hasil.gagal.length} baris gagal`);
+			} else {
+				toast.sukses(`Import selesai — ${ringkas}`);
+			}
+			catatLog(
+				`Import Excel "${namaFileImport}": ${ringkas}` +
+					(hasil.gagal.length > 0 ? `, ${hasil.gagal.length} baris gagal` : '')
+			);
+			muatUlang();
+			// produk yang sedang dibuka di form bisa saja baru diubah file import —
+			// isinya jadi basi, dan Simpan Perubahan akan menimpanya balik
+			if (editId !== null) resetForm();
+		} catch (e) {
+			console.error('Gagal menerapkan import:', e);
+			toast.error('Gagal menerapkan import');
+		} finally {
+			sedangTerapkan = false;
+		}
+	}
+
+	function batalImport() {
+		rencana = null;
+		namaFileImport = '';
+	}
+
+	function tutupDenganEsc(event: KeyboardEvent) {
+		if (event.key === 'Escape' && rencana !== null && !sedangTerapkan) batalImport();
+	}
+
 	function resetForm() {
 		editId = null;
 		editSebelum = null;
@@ -464,6 +572,14 @@
 						{dariNomor}-{sampaiNomor} dari {totalBarang} produk
 					{/if}
 				</span>
+				<div class="list-actions">
+					<button onclick={jalankanExport} disabled={sedangExport}>
+						{sedangExport ? 'Menyiapkan...' : 'Export Excel'}
+					</button>
+					<button onclick={jalankanImport} disabled={sedangImport}>
+						{sedangImport ? 'Membaca...' : 'Import Excel'}
+					</button>
+				</div>
 			</div>
 			<input
 				class="search"
@@ -524,6 +640,90 @@
 		{/if}
 	</section>
 </div>
+
+<svelte:window onkeydown={tutupDenganEsc} />
+
+{#if rencana}
+	<div class="import-overlay" role="presentation">
+		<div class="import-card card" role="dialog" aria-modal="true" aria-label="Pratinjau import produk">
+			<div class="import-head">
+				<h2>Pratinjau Import</h2>
+				<span class="import-file">{namaFileImport}</span>
+			</div>
+
+			<div class="import-stat">
+				<div class="stat baru">
+					<strong>{rencana.baru.length}</strong>
+					<span>produk baru</span>
+				</div>
+				<div class="stat ubah">
+					<strong>{rencana.ubah.length}</strong>
+					<span>diubah</span>
+				</div>
+				<div class="stat">
+					<strong>{rencana.sama}</strong>
+					<span>tidak berubah</span>
+				</div>
+				<div class="stat" class:error={rencana.error.length > 0}>
+					<strong>{rencana.error.length}</strong>
+					<span>baris ditolak</span>
+				</div>
+			</div>
+
+			<p class="import-note">
+				Produk yang tidak ada di file dibiarkan apa adanya — import tidak menghapus produk.
+			</p>
+
+			<div class="import-list">
+				{#each rencana.ubah as u (u.sebelum.id)}
+					<div class="import-row">
+						<span class="tag ubah">Ubah</span>
+						<span class="import-isi">
+							<strong>{u.sebelum.nama}</strong>
+							<span class="import-detail">{u.perubahan.join(', ')}</span>
+						</span>
+					</div>
+				{/each}
+				{#each rencana.baru as b (b.baris)}
+					<div class="import-row">
+						<span class="tag baru">Baru</span>
+						<span class="import-isi">
+							<strong>{b.nama}</strong>
+							<span class="import-detail">
+								{formatRupiah(b.harga)} · stok {b.qty ?? '-'} · {b.barcode}
+							</span>
+						</span>
+					</div>
+				{/each}
+				{#each rencana.error as e (e.baris)}
+					<div class="import-row">
+						<span class="tag error">Baris {e.baris}</span>
+						<span class="import-isi">
+							<span class="import-detail err">{e.pesan}</span>
+						</span>
+					</div>
+				{/each}
+			</div>
+
+			<div class="import-actions">
+				<button onclick={batalImport} disabled={sedangTerapkan}>Batal</button>
+				<button
+					class="primary"
+					onclick={terapkanImport}
+					disabled={sedangTerapkan || totalPerubahan === 0}
+				>
+					{#if sedangTerapkan}
+						Menerapkan...
+					{:else if totalPerubahan === 0}
+						Tidak ada yang bisa diterapkan
+					{:else}
+						Terapkan {totalPerubahan} perubahan
+					{/if}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.produk {
@@ -667,6 +867,176 @@
 	.jumlah {
 		font-size: 0.85rem;
 		color: var(--text-muted);
+	}
+
+	/* mendorong tombol ke ujung kanan; jumlah produk tetap menempel judulnya */
+	.list-actions {
+		display: flex;
+		gap: 0.5rem;
+		margin-left: auto;
+	}
+
+	.list-actions button {
+		font-size: 0.82rem;
+		padding: 0.4rem 0.75rem;
+	}
+
+	.import-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.45);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 100;
+		padding: 1.5rem;
+	}
+
+	.import-card {
+		width: 100%;
+		max-width: 560px;
+		padding: 1.5rem;
+		display: flex;
+		flex-direction: column;
+		/* isi daftarnya yang menggulung, bukan kartunya — tombol Terapkan harus
+		   tetap terlihat walau perubahannya ratusan baris */
+		max-height: calc(100vh - 3rem);
+		min-height: 0;
+	}
+
+	.import-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-bottom: 1rem;
+	}
+
+	.import-card h2 {
+		margin: 0;
+		font-size: 1.1rem;
+	}
+
+	.import-file {
+		font-size: 0.78rem;
+		color: var(--text-muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.import-stat {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 0.5rem;
+	}
+
+	.stat {
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 0.6rem 0.5rem;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.15rem;
+	}
+
+	.stat strong {
+		font-size: 1.35rem;
+		line-height: 1.1;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.stat span {
+		font-size: 0.72rem;
+		color: var(--text-muted);
+		text-align: center;
+	}
+
+	.stat.baru strong,
+	.stat.ubah strong {
+		color: var(--accent);
+	}
+
+	.stat.error strong {
+		color: var(--danger);
+	}
+
+	.import-note {
+		font-size: 0.78rem;
+		color: var(--text-muted);
+		margin: 0.9rem 0 0.6rem;
+	}
+
+	.import-list {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+	}
+
+	.import-row {
+		display: flex;
+		gap: 0.6rem;
+		align-items: flex-start;
+		padding: 0.5rem 0.65rem;
+		border-bottom: 1px solid var(--border);
+		font-size: 0.85rem;
+	}
+
+	.import-row:last-child {
+		border-bottom: none;
+	}
+
+	.tag {
+		flex-shrink: 0;
+		font-size: 0.68rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		padding: 0.15rem 0.4rem;
+		border-radius: 4px;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		color: var(--text-muted);
+		margin-top: 0.1rem;
+	}
+
+	.tag.baru,
+	.tag.ubah {
+		color: var(--accent);
+		border-color: var(--accent);
+	}
+
+	.tag.error {
+		color: var(--danger);
+		border-color: var(--danger);
+		text-transform: none;
+	}
+
+	.import-isi {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		min-width: 0;
+	}
+
+	.import-detail {
+		font-size: 0.78rem;
+		color: var(--text-muted);
+	}
+
+	.import-detail.err {
+		color: var(--danger);
+	}
+
+	.import-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.6rem;
+		margin-top: 1rem;
 	}
 
 	.search {
