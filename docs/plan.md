@@ -189,6 +189,61 @@ terus untuk laporan penjualan itu ada dua laporan penjalan hari ini dashboard ny
 
 dan pake tap juga yah pisahkan penjualan keselurahn dan hari ini kerena itu penting banget 
 
+plan fase 18 ✅
+- membuat fitur export import untuk product dimana ini berfungsi untuk mereka bisa mengedit data di exel dan memportnya kembali ke app pos nya. ini bertujuan mengecek data yang cocat dan akan ada fitur baru sehingga harus membecup data dan perbaiki data gitu. fitur ini hanya ada pada product saja 
+
+- dua tombol di header Daftar Produk: Export Excel & Import Excel (halaman Produk saja)
+- Export: SELURUH katalog (bukan halaman/hasil cari yang sedang tampil), sheet "Produk"
+  kolom ID / Barcode / Nama Produk / Harga / Stok, plus baris petunjuk cara mengeditnya.
+  Stok yang tidak dilacak ditulis kosong, bukan 0 — 0 berarti "habis", beda artinya.
+- Import: pilih .xlsx → pratinjau dulu (berapa baru, berapa diubah beserta rincian
+  "harga: Rp65.000 → Rp70.000", berapa tidak berubah, baris mana yang ditolak dan kenapa)
+  → baru ditekan Terapkan. Tidak ada perubahan yang masuk tanpa dilihat user.
+- keputusan yang dikonfirmasi user:
+  - baris yang dihapus dari file TIDAK menghapus produk di app — import hanya menambah & mengubah
+  - baris baru (barcode belum ada) BOLEH jadi produk baru, jadi import sekalian alat input massal
+- pencocokan: ID dulu, lalu barcode. ID yang tidak ketemu sengaja tidak dianggap error dan
+  jatuh ke pencocokan barcode — file backup dari mesin lain punya urutan ID berbeda, menolak
+  semua barisnya akan bikin fitur ini tak berguna justru di kasus yang paling membutuhkannya.
+- header dicari (bukan diasumsikan di baris 4) dan dicocokkan lewat judul kolom, bukan urutannya,
+  dengan alias longgar (Kode/Nama Barang/Harga Jual/Stock) — kolom yang digeser user tetap terbaca.
+  Harga "Rp 70.000" maupun "12,500" tetap terbaca sebagai angka.
+- barcode yang bentrok dengan produk lain ditolak di pratinjau dengan menyebut nama produknya,
+  bukan dibiarkan jadi error UNIQUE mentah dari SQLite.
+- teknis: capabilities Tauri ditambah fs:allow-read-file (sebelumnya cuma write, karena
+  belum pernah ada fitur yang membaca file pilihan user)
+
+
+  plan fase 19 ✅
+  - buatkan agar aplikasih tampilanya tidak akan mati, jadi dengan begitu aplikasi tidak ada sleep. ini berfugnsi untuk kasih tetap nyala
+
+  - penahan utama di Rust: src-tauri/src/keep_awake.rs, dipanggil dari lib.rs sebelum
+    tauri::Builder. Aktif otomatis sejak app dibuka, tanpa tombol — plan-nya memang minta
+    selalu nyala.
+  - app ini dipasang di mesin kasir Windows DAN Linux Mint, dikembangkan di macOS. Ketiganya
+    beda mekanisme total: Windows SetThreadExecutionState, Linux D-Bus
+    org.freedesktop.ScreenSaver.Inhibit (yang dipatuhi cinnamon-screensaver) + inhibitor
+    lock logind untuk idle, macOS IOKit power assertion.
+  - dipakai crate `keepawake` (MIT) yang menangani ketiganya. Awalnya ditulis tangan lewat
+    extern "system" ke kernel32 supaya tanpa dependency, tapi itu cuma jalan di Windows —
+    yang Linux tidak bisa ditulis tangan tanpa klien D-Bus, dan cookie hasil Inhibit hanya
+    berlaku selama koneksi D-Bus-nya hidup (jadi `dbus-send` sekali jalan tidak bisa dipakai).
+  - penahannya berupa nilai yang dipegang di run() (`let _penahan_layar`), bukan dilepas
+    begitu saja: begitu di-drop, layar boleh mati lagi. run() memblokir sampai app ditutup,
+    lalu penahannya dilepas dengan benar (un-inhibit di Linux, reset state di Windows).
+  - di Windows penahannya terikat ke thread pemanggil, jadi harus dari main thread — bukan
+    dari handler Tauri command yang jalan di thread pool tokio dan bisa berganti thread.
+  - `sleep` sengaja tidak diaktifkan, hanya `display` + `idle`: yang diminta layar tidak mati
+    sendiri, bukan melarang orang menidurkan komputernya dengan sengaja.
+  - gagal menahan layar tidak membatalkan start-up — kasir tetap bisa jualan, layarnya saja
+    yang bisa mati seperti sebelum fase 19.
+  - pelengkap di sisi WebView: src/lib/keepAwake.ts pakai navigator.wakeLock, dipasang di
+    root +layout supaya berlaku sejak layar login (bukan cuma setelah masuk). Wake lock lepas
+    sendiri saat jendela disembunyikan, jadi diambil ulang lewat visibilitychange. Semua
+    kegagalannya didiamkan — kalau WebView-nya tidak mendukung, penahan Rust sudah cukup.
+  - cara memeriksa kalau curiga tidak jalan: Windows `powercfg /requests`,
+    Linux `systemd-inhibit --list`, macOS `pmset -g assertions`. 
+
 
 ## plan fix 
 plan fix 1 ✅
