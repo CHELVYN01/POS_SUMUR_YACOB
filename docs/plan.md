@@ -244,6 +244,30 @@ plan fase 18 ✅
   - cara memeriksa kalau curiga tidak jalan: Windows `powercfg /requests`,
     Linux `systemd-inhibit --list`, macOS `pmset -g assertions`. 
 
+fase 20 ✅
+- app harus bisa dipasang di Linux Mint juga, installer-nya dibuat di GitHub Actions
+- `.github/workflows/build-windows.yml` diganti `build.yml`: satu workflow, dua job build
+  (`windows` + `linux`) yang jalan berbarengan, lalu satu job `release` yang mengumpulkan
+  hasil keduanya jadi satu draft Release.
+  - job release sengaja dipisah dari job build. Kalau tiap job build bikin release-nya
+    sendiri, dua job yang selesai berbarengan bisa menghasilkan dua draft dengan tag sama.
+- job linux dipin ke `ubuntu-22.04`, BUKAN `ubuntu-latest`. Paket `.deb` terikat versi glibc
+  mesin pembangunnya: dibangun di 24.04 → gagal di Mint 21 (`GLIBC_2.38 not found`);
+  dibangun di 22.04 → jalan di Mint 21 maupun Mint 22. Jangan dinaikkan.
+- bundle Linux: `deb` (yang dipasang di client) + `appimage` (portabel, cadangan kalau
+  `.deb` ditolak karena beda distro).
+- di Linux, Tauri memakai WebKitGTK milik sistem — tidak ada runtime yang ikut ditempelkan
+  seperti WebView2 di Windows. Jadi header GTK/WebKit dipasang dulu lewat apt saat build,
+  dan `.deb`-nya kecil (~10 MB) tapi pemasangan pertama butuh internet sekali untuk menarik
+  dependency sistemnya. Pasang pakai `sudo apt install ./file.deb`, bukan `dpkg -i`.
+- `workflow_dispatch` dapat pilihan platform (semua/windows/linux) untuk menguji satu sisi.
+- sekalian fix bug yang cuma muncul di Linux: db_manager memakai `app_data_dir()` untuk
+  operasi file database, padahal tauri-plugin-sql menerjemahkan `"sqlite:pos.db"` relatif
+  terhadap `app_config_dir()`. Di Windows & macOS keduanya menunjuk folder yang sama jadi
+  tidak pernah kelihatan salah; di Linux config = `~/.config/<id>` sedangkan data =
+  `~/.local/share/<id>` → Backup/Restore/Reset menyentuh folder kosong dan database aslinya
+  tidak tersentuh. Diganti `db_dir()` yang selalu memakai app_config_dir.
+
 
 ## plan fix 
 plan fix 1 ✅
