@@ -9,6 +9,10 @@ Sistem POS (Point of Sale) sederhana untuk kios/warung kecil. Desktop app, offli
 - **Database lokal**: SQLite via `tauri-plugin-sql` (offline-first, sumber data utama)
 - **Backup/sync**: Supabase (sinkronisasi berkala untuk backup data ke internet)
 
+**Target mesin client: Windows dan Linux Mint** (dikembangkan di macOS). Fitur
+yang menyentuh API OS — path folder data, keep-awake, dialog file — harus benar
+di keduanya, bukan cuma tidak error di salah satunya.
+
 ## Struktur Project
 
 ```
@@ -64,10 +68,11 @@ Langkahnya:
    - `pos-app/src-tauri/Cargo.toml`
 2. Commit kenaikan versi itu.
 3. Buat tag `v<versi>` lalu push tag-nya — workflow
-   [build-windows.yml](.github/workflows/build-windows.yml) hanya jalan untuk
-   membuat Release kalau ada tag `v*`.
-4. Installer muncul di halaman Releases sebagai **draft** untuk diperiksa dulu,
-   dan juga di bagian Artifacts pada run-nya.
+   [build.yml](.github/workflows/build.yml) hanya jalan untuk membuat Release
+   kalau ada tag `v*`.
+4. Installer Windows (`.exe`/`.msi`) dan Linux (`.deb`/`.AppImage`) muncul di
+   halaman Releases sebagai **draft** untuk diperiksa dulu, dan juga di bagian
+   Artifacts pada run-nya.
 
 Kenapa harus naik terus: kalau versinya tidak berubah, sulit memastikan mesin
 client benar-benar memakai build terbaru — gejala lama bisa muncul lagi hanya

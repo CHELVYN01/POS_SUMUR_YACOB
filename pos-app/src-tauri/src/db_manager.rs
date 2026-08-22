@@ -38,14 +38,24 @@ pub struct SeedAdmin {
     password: String,
 }
 
+/// Folder tempat `pos.db` berada, dihitung tanpa `AppHandle` (dipakai sebelum
+/// Tauri dibangun). Harus menghasilkan path yang sama dengan [`db_dir`].
 fn app_data_dir_manual() -> PathBuf {
     dirs::config_dir()
         .expect("tidak bisa menemukan config dir OS")
         .join(APP_IDENTIFIER)
 }
 
-fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path().app_data_dir().map_err(|e| e.to_string())
+/// Folder database. **Wajib** `app_config_dir()`, bukan `app_data_dir()`:
+/// `tauri-plugin-sql` menerjemahkan `"sqlite:pos.db"` relatif terhadap
+/// app_config_dir, jadi di situlah file DB yang sebenarnya dipakai berada.
+///
+/// Di Windows & macOS keduanya kebetulan menunjuk folder yang sama, jadi
+/// memakai `app_data_dir()` tidak pernah kelihatan salah. Di Linux beda:
+/// config = `~/.config/<id>`, data = `~/.local/share/<id>` — Backup/Restore/
+/// Reset akan menyentuh folder kosong dan database aslinya tidak tersentuh.
+fn db_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app_config_dir(app)
 }
 
 fn app_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -217,7 +227,7 @@ async fn repair_checksums(db: &Path) -> Result<(), String> {
 /// plugin mount.
 #[tauri::command]
 pub fn take_pending_seed_admin(app: AppHandle) -> Result<Option<SeedAdmin>, String> {
-    let dir = app_data_dir(&app)?;
+    let dir = db_dir(&app)?;
     let seed_pending = seed_pending_path(&dir);
     if !seed_pending.exists() {
         return Ok(None);
@@ -242,7 +252,7 @@ fn write_db_zip(db_bytes: &[u8], dest: &Path) -> Result<(), String> {
 
 #[tauri::command]
 pub fn backup_database(app: AppHandle, dest_path: String) -> Result<(), String> {
-    let dir = app_data_dir(&app)?;
+    let dir = db_dir(&app)?;
     let db = db_path(&dir);
     let bytes = fs::read(&db).map_err(|e| format!("Gagal membaca database: {e}"))?;
     write_db_zip(&bytes, Path::new(&dest_path))
@@ -339,7 +349,7 @@ pub fn run_auto_backup_if_due(app: AppHandle) -> Result<bool, String> {
         }
     }
 
-    let dir = app_data_dir(&app)?;
+    let dir = db_dir(&app)?;
     let db = db_path(&dir);
     let bytes = fs::read(&db).map_err(|e| format!("Gagal membaca database: {e}"))?;
 
@@ -384,7 +394,7 @@ pub fn validate_zip_backup(zip_path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn restore_database(app: AppHandle, zip_path: String) -> Result<(), String> {
     let buf = read_and_validate_zip(&zip_path)?;
-    let dir = app_data_dir(&app)?;
+    let dir = db_dir(&app)?;
     fs::write(pending_path(&dir), &buf).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -400,7 +410,7 @@ pub fn reset_database(
         return Err("Data admin baru wajib diisi".to_string());
     }
 
-    let dir = app_data_dir(&app)?;
+    let dir = db_dir(&app)?;
     let db = db_path(&dir);
 
     if db.exists() {

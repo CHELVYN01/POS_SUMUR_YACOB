@@ -5,10 +5,11 @@ Dua hal yang berbeda, jangan tertukar:
 | Tujuan | Di mana | Hasil |
 | --- | --- | --- |
 | **Ngoding sehari-hari** | MacBook (lokal) | window app macOS, hot reload |
-| **Installer untuk client** | GitHub Actions | `.exe` Windows |
+| **Installer untuk client** | GitHub Actions | `.exe` Windows + `.deb` Linux |
 
-Target client adalah **Windows**. macOS hanya dipakai untuk ngoding — installer
-Windows tidak bisa dan tidak perlu dibuat dari Mac.
+Mesin client ada dua macam: **Windows** dan **Linux Mint**. macOS hanya dipakai
+untuk ngoding — installer keduanya tidak bisa dan tidak perlu dibuat dari Mac,
+karena tiap OS butuh dibangun di OS-nya sendiri.
 
 ---
 
@@ -64,51 +65,88 @@ Buka `http://localhost:1420`. **Terbatas:** SQLite, backup, dan semua
 
 ---
 
-## 2. Membuat installer Windows (rilis)
+## 2. Membuat installer (rilis)
 
-Dijalankan oleh GitHub Actions di runner Windows asli. Tidak perlu PC Windows,
-tidak perlu Docker, tidak perlu install apa pun di Mac.
+Dijalankan oleh GitHub Actions di runner Windows dan Linux asli. Tidak perlu PC
+Windows, tidak perlu PC Linux, tidak perlu Docker, tidak perlu install apa pun
+di Mac.
 
-Definisinya ada di [`.github/workflows/build-windows.yml`](../.github/workflows/build-windows.yml).
+Definisinya ada di [`.github/workflows/build.yml`](../.github/workflows/build.yml).
+Satu workflow, dua job build (`windows` dan `linux`) yang jalan berbarengan,
+lalu satu job `release` yang mengumpulkan hasil keduanya.
 
 ### Cara A — build percobaan (paling sering dipakai)
 
 1. Pastikan kode sudah di-push: `git push origin master`
 2. Buka repo di GitHub → tab **Actions**
-3. Pilih workflow **Build Windows** di sidebar kiri
-4. Klik **Run workflow** → **Run workflow**
+3. Pilih workflow **Build Installer** di sidebar kiri
+4. Klik **Run workflow**. Ada pilihan **Platform**: `semua` (default),
+   `windows`, atau `linux` — pakai kalau cuma mau menguji satu sisi.
 5. Tunggu ~15 menit (build pertama; berikutnya lebih cepat karena cache)
 6. Buka run yang selesai → bagian **Artifacts** → download
-   `pos-sumur-yacob-windows`
+   `pos-sumur-yacob-windows` dan/atau `pos-sumur-yacob-linux`
 
 Isinya file `.zip` berisi installer. Extract, lalu kirim ke client.
 
 ### Cara B — rilis resmi
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.8
+git push origin v0.1.8
 ```
 
 Workflow jalan otomatis dan membuat **draft release** di halaman Releases
-lengkap dengan installer terlampir. Draft — jadi kamu bisa periksa dulu sebelum
-klik Publish.
+lengkap dengan installer Windows *dan* Linux terlampir. Draft — jadi kamu bisa
+periksa dulu sebelum klik Publish.
 
-> Naikkan juga `version` di `pos-app/package.json` dan
-> `pos-app/src-tauri/tauri.conf.json` supaya cocok dengan tagnya.
+> Naikkan dulu `version` di keempat tempat (`package.json`,
+> `package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`)
+> supaya cocok dengan tagnya. Lihat bagian Rilis di `CLAUDE.md`.
 
 ---
 
 ## 3. File mana yang dikirim ke client?
 
-Build menghasilkan dua installer:
+### Windows
 
 | File | Kapan dipakai |
 | --- | --- |
 | `pos-app_<versi>_x64-setup.exe` | **Ini yang dibagikan.** Installer NSIS, paling toleran terhadap Windows lawas. |
 | `pos-app_<versi>_x64_en-US.msi` | Cadangan, untuk deploy via Group Policy di jaringan kantor. |
 
-### Pemasangan tanpa internet
+### Linux Mint
+
+| File | Kapan dipakai |
+| --- | --- |
+| `pos-app_<versi>_amd64.deb` | **Ini yang dibagikan.** Paket normal Mint/Ubuntu, masuk menu aplikasi, bisa di-update dengan memasang versi baru di atasnya. |
+| `pos-app_<versi>_amd64.AppImage` | Cadangan portabel: satu file, tidak dipasang, tinggal `chmod +x` lalu dijalankan. Berguna kalau `.deb` ditolak karena beda versi distro. |
+
+Memasang `.deb`-nya:
+
+```bash
+sudo apt install ./pos-app_0.1.8_amd64.deb
+```
+
+Pakai `apt install ./file.deb`, **bukan** `dpkg -i` — `apt` sekalian menarik
+dependency sistem (WebKitGTK dan kawan-kawannya) yang mungkin belum terpasang;
+`dpkg` akan berhenti dengan error dependency dan meninggalkan paket setengah
+terpasang.
+
+Di Linux, Tauri memakai **WebKitGTK milik sistem**, tidak ada runtime yang ikut
+ditempelkan seperti WebView2 di Windows. Karena itu `.deb`-nya kecil (~10 MB,
+bukan ~130 MB), tapi pemasangan pertama di mesin yang belum punya WebKitGTK
+butuh internet sekali untuk menarik dependency-nya. Setelah terpasang, app
+jalan offline penuh seperti biasa.
+
+### Kenapa runner-nya dipin ke Ubuntu 22.04
+
+Paket `.deb` terikat pada versi glibc mesin yang membangunnya. Kalau dibangun
+di Ubuntu 24.04 (`ubuntu-latest`), hasilnya hanya jalan di Mint 22 ke atas dan
+gagal di Mint 21 dengan `GLIBC_2.38 not found`. Dibangun di 22.04, jalan di
+Mint 21 maupun Mint 22. Jadi `runs-on: ubuntu-22.04` di workflow itu disengaja
+— jangan dinaikkan hanya karena ada runner yang lebih baru.
+
+### Pemasangan tanpa internet (Windows)
 
 `tauri.conf.json` diset `webviewInstallMode: "offlineInstaller"`. Runtime
 WebView2 lengkap ditempelkan ke dalam installer, jadi pemasangan **benar-benar
@@ -155,11 +193,14 @@ Pilihan yang tersedia, dari yang paling masuk akal:
 
 ## 4. Kenapa tidak pakai Docker?
 
-Pernah dicoba, lalu dibuang. Container Docker **selalu Linux**, jadi yang
-dihasilkan adalah `.deb` Linux — bukan `.exe` yang dibutuhkan client. Untuk
-sekadar ngoding pun kalah: window harus ditonton lewat VNC di browser dengan
-render software, dan membangun image-nya makan puluhan menit karena Mac
-Apple Silicon menarik paket dari `ports.ubuntu.com` yang tidak punya CDN.
+Pernah dicoba, lalu dibuang. Container Docker **selalu Linux**, jadi `.exe`
+Windows tetap tidak bisa dihasilkan dari situ. Untuk `.deb` pun kalah dari
+runner GitHub yang sudah Linux asli dan gratis. Untuk sekadar ngoding lebih
+kalah lagi: window harus ditonton lewat VNC di browser dengan render software,
+dan membangun image-nya makan puluhan menit karena Mac Apple Silicon menarik
+paket dari `ports.ubuntu.com` yang tidak punya CDN. Ditambah lagi Docker di Mac
+Apple Silicon itu arm64, sedangkan mesin client x86_64 — `.deb`-nya pun salah
+arsitektur.
 
-Rust native di Mac (~2 menit pasang) + GitHub Actions untuk rilis Windows lebih
-cepat di kedua sisi.
+Rust native di Mac (~2 menit pasang) + GitHub Actions untuk rilis Windows &
+Linux lebih cepat di semua sisi.
