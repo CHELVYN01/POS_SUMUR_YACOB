@@ -21,18 +21,81 @@ on:
         default: semua
         options: [semua, windows, linux]
   push:
+    branches:
+      - master # merge ke master → draft Release otomatis kalau versinya baru
     tags:
-      - "v*" # mis. v0.1.8 → sekalian bikin GitHub Release
+      - "v*" # mis. v0.2.0 → dipakai kalau mau menandai rilis manual
 
 # Diperlukan agar job release bisa membuat entri di halaman Releases.
 permissions:
   contents: write
 
 jobs:
+  # ------------------------------------------------------------------ Versi --
+  # Membaca versi dari tauri.conf.json (satu-satunya angka yang menentukan versi
+  # installer) dan memutuskan apakah run ini layak jadi Release.
+  #
+  # Ada supaya nomor rilis tidak perlu diketik dua kali. Sebelumnya nama tag dan
+  # versi di berkas tidak saling terhubung sama sekali: tag v0.3.0 dengan berkas
+  # yang masih 0.2.0 akan menghasilkan halaman Release bertuliskan v0.3.0 berisi
+  # installer 0.2.0, dan tidak ada yang mencegahnya.
+  versi:
+    runs-on: ubuntu-latest
+    outputs:
+      versi: ${{ steps.baca.outputs.versi }}
+      tag: ${{ steps.baca.outputs.tag }}
+      rilis: ${{ steps.baca.outputs.rilis }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # butuh seluruh tag untuk tahu versi ini sudah pernah dirilis
+
+      - name: Baca versi & tentukan perlu rilis
+        id: baca
+        run: |
+          versi=$(node -p "require('./pos-app/src-tauri/tauri.conf.json').version")
+          echo "versi=$versi" >> "$GITHUB_OUTPUT"
+          echo "Versi di tauri.conf.json: $versi"
+
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            # Dipicu tag manual: tag yang menentukan, tapi wajib cocok dengan berkas.
+            tag="${{ github.ref_name }}"
+            if [ "$tag" != "v$versi" ]; then
+              echo "::error::Tag $tag tidak cocok dengan versi di tauri.conf.json ($versi)."
+              echo "::error::Naikkan versinya di lima tempat, atau buat tag v$versi."
+              exit 1
+            fi
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "rilis=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          tag="v$versi"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" != "push" ]; then
+            # Run manual: installer saja, tanpa Release. Tombol itu dipakai untuk
+            # mencoba build, bukan untuk merilis.
+            echo "rilis=false" >> "$GITHUB_OUTPUT"
+            echo "Run manual — artifact saja, tidak membuat Release."
+          elif git rev-parse "refs/tags/$tag" >/dev/null 2>&1; then
+            # Versi ini sudah pernah dirilis. Tanpa penjagaan ini, tiap push ke
+            # master akan menimpa draft (atau release) yang sudah ada.
+            echo "rilis=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Tag $tag sudah ada — versinya belum dinaikkan, Release dilewati."
+          else
+            echo "rilis=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Versi baru $versi — draft Release akan dibuat sebagai $tag."
+          fi
+
   # ---------------------------------------------------------------- Windows --
   windows:
     # Saat dipicu tag, `inputs.platform` kosong — jadi job ini tetap jalan.
     if: inputs.platform != 'linux'
+    # Menunggu job versi supaya tag yang tidak cocok dengan tauri.conf.json
+    # menggagalkan run lebih dulu, sebelum menghabiskan ~20 menit membangun.
+    needs: versi
     runs-on: windows-latest
 
     defaults:
@@ -105,6 +168,7 @@ jobs:
   # ------------------------------------------------------------------ Linux --
   linux:
     if: inputs.platform != 'windows'
+    needs: versi
 
     # SENGAJA 22.04, bukan ubuntu-latest. Paket .deb terikat pada versi glibc
     # mesin yang membangunnya: dibangun di 24.04 → hanya jalan di Mint 22 ke
@@ -189,9 +253,21 @@ jobs:
   # Releases. Kalau tiap job build bikin release-nya sendiri, dua job yang
   # selesai berbarengan bisa menghasilkan dua draft dengan tag yang sama.
   release:
-    # Hanya jalan kalau dipicu oleh tag v* — bukan saat "Run workflow" manual.
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux]
+    # Jalan untuk push ke master dengan versi yang belum pernah dirilis, dan untuk
+    # tag v* manual. Run manual lewat tombol tidak pernah sampai ke sini — lihat
+    # job `versi` yang menentukan `rilis`.
+    #
+    # always() perlu supaya job ini tetap dinilai walau salah satu build di-skip
+    # (mis. `platform: windows` saja); `result != 'failure'` yang menjaga Release
+    # tidak dibuat dari build yang gagal.
+    if: |
+      always() &&
+      needs.versi.outputs.rilis == 'true' &&
+      needs.windows.result != 'failure' &&
+      needs.linux.result != 'failure' &&
+      needs.windows.result != 'cancelled' &&
+      needs.linux.result != 'cancelled'
+    needs: [versi, windows, linux]
     runs-on: ubuntu-latest
 
     steps:
@@ -200,9 +276,15 @@ jobs:
         with:
           path: installer
 
+      # tag_name dibaca dari tauri.conf.json, bukan diketik tangan. Kalau tag-nya
+      # belum ada, action ini yang membuatnya di commit yang sedang dibangun —
+      # jadi merge ke master sudah cukup, tidak perlu `git tag` manual lagi.
       - name: Buat GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.versi.outputs.tag }}
+          name: ${{ needs.versi.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           draft: true # dicek dulu sebelum dipublikasikan
           generate_release_notes: true
           files: installer/**/*
