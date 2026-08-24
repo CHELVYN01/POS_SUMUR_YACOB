@@ -268,6 +268,36 @@ fase 20 ✅
   `~/.local/share/<id>` → Backup/Restore/Reset menyentuh folder kosong dan database aslinya
   tidak tersentuh. Diganti `db_dir()` yang selalu memakai app_config_dir.
 
+plan fase 21 ✅
+- Lisensi & aktivasi (kode lisensi, ikat ke mesin, batas perangkat, tier tersimpan di lisensi)
+- rancangan lengkap & spesifikasi format: docs/lisensi.md (dipakai dua repo, satu sumber kebenaran)
+- alurnya: bayar di web-kios-pos → server menerbitkan kode bertanda tangan Ed25519 →
+  kode tampil di /pembayaran/sukses (salin + unduh .lic) → client memasukkannya di layar
+  aktivasi aplikasi → diverifikasi OFFLINE dengan public key yang ditanam di binary.
+- kenapa asimetris, bukan panggilan server: kasir wajib bisa jualan tanpa internet, jadi
+  keaslian kode harus bisa dibuktikan tanpa menghubungi apa pun. Rahasia simetris memang
+  menghasilkan kode ~20 karakter (bukan ~210), tapi siapa pun yang membongkar binary bisa
+  bikin keygen sendiri.
+- satu kode = satu perangkat. Paket Pro (3 perangkat) menerima 3 kode berbeda saat bayar,
+  paket Bisnis 1 kode bertanda "tanpa batas". Tidak ada server yang menghitung aktivasi —
+  yang ditegakkan pengikatan ke mesin, bukan keunikan; kode yang disalin ke mesin lain
+  tetap bisa aktif di sana. Jalur untuk menegakkannya nanti sudah disiapkan lewat field
+  `m` (sidik jari mesin di dalam payload) yang sudah dibaca aplikasi tapi belum diterbitkan.
+- sidik jari mesin dari identitas bawaan OS (MachineGuid / /etc/machine-id / IOPlatformUUID)
+  lewat crate machine-uid, di-hash SHA-256 + garam, ditampilkan 16 hex pertama sebagai
+  A1B2-C3D4-E5F6-7890. Berubah kalau OS dipasang ulang → kode harus diterbitkan ulang.
+- lisensi disimpan di app_config_dir/lisensi.json, BUKAN di dalam pos.db. Kalau ikut di
+  database, Restore backup dari mesin lain akan membawa lisensi mesin itu dan "Buat Baru"
+  di Database Manager akan menghapus lisensi yang sah.
+- tanda tangan diperiksa ULANG tiap aplikasi dibuka, bukan cuma saat aktivasi — jadi
+  mengedit lisensi.json dengan tangan (mis. menaikkan tier) hanya membuat lisensinya ditolak.
+- saat tidak berlisensi aplikasi terkunci di /aktivasi, tapi /database-manager tetap bisa
+  dibuka: mengunci aplikasi tidak boleh berarti menyandera data pemilik toko.
+- tier ikut ditandatangani dan tampil di Pengaturan > Umum, tapi belum ada fitur yang
+  dikunci per tier — mekanismenya sudah ada, pembatasannya menyusul tanpa ganti format.
+- CATATAN RILIS: aplikasi yang sudah terpasang di Sumur Yacob akan ikut terkunci begitu
+  versi berlisensi dipasang. Terbitkan kodenya dulu lewat `npm run lisensi`.
+
 
 ## plan fix 
 plan fix 1 ✅
@@ -334,6 +364,7 @@ empat hal, semuanya soal Daftar Produk & log:
      bukan cuma menyaring 30 yang tampil — kalau tidak, produk di luar 30 teratas mustahil ketemu
    - kolom scan barcode di keranjang tetap seperti sekarang (scan → langsung masuk keranjang);
      yang diperkuat adalah kolom "Cari produk..." supaya bisa dicari pakai nama maupun nomor barcode
+
 
 
 

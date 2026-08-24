@@ -6,6 +6,8 @@
 	import { setMasterPassword, getAutoBackupDir, setAutoBackupDir } from '$lib/db-manager';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { BUILD_DATE, BUILD_COMMIT, APP_VERSION, APP_AUTHOR } from '$lib/buildInfo';
+	import { hapusLisensi, labelPerangkat, labelTier } from '$lib/lisensi';
+	import { lisensi, segarkanLisensi } from '$lib/stores/lisensi';
 	import type { User } from '$lib/types';
 
 	let users = $state<User[]>([]);
@@ -21,6 +23,28 @@
 	let listError = $state('');
 
 	let isAdmin = $derived($currentUser?.role === 'admin');
+
+	let lepasPassword = $state('');
+	let lepasError = $state('');
+	let lepasProses = $state(false);
+	let formLepasTerbuka = $state(false);
+
+	async function lepasLisensi(event: Event) {
+		event.preventDefault();
+		lepasError = '';
+		lepasProses = true;
+		try {
+			await hapusLisensi(lepasPassword);
+			lepasPassword = '';
+			// Menyegarkan store langsung memicu penjaga di (app)/+layout, jadi layar
+			// pindah sendiri ke halaman aktivasi tanpa perlu goto() di sini.
+			await segarkanLisensi();
+		} catch (e) {
+			lepasError = e instanceof Error ? e.message : String(e);
+		} finally {
+			lepasProses = false;
+		}
+	}
 
 	type Tab = 'umum' | 'user' | 'sinkronisasi' | 'keamanan';
 	let tab = $state<Tab>('umum');
@@ -202,6 +226,53 @@
 					<div class="me-name">{$currentUser.nama}</div>
 					<div class="me-meta">@{$currentUser.username} · {$currentUser.role}</div>
 				</div>
+			{/if}
+		</section>
+
+		<section class="card section">
+			<h2>Lisensi</h2>
+			{#if $lisensi?.aktif}
+				<div class="me">
+					<div class="me-name">Paket {labelTier($lisensi)}</div>
+					<div class="me-meta">Berlisensi kepada {$lisensi.nama}</div>
+					<div class="me-meta">{labelPerangkat($lisensi)}</div>
+					<div class="me-meta">ID Mesin {$lisensi.idMesin}</div>
+					{#if $lisensi.nomorPesanan}
+						<div class="me-meta">Pesanan {$lisensi.nomorPesanan}</div>
+					{/if}
+					<div class="me-meta">
+						Berlaku {$lisensi.kedaluwarsa ? `sampai ${$lisensi.kedaluwarsa}` : 'selamanya'}
+					</div>
+				</div>
+				{#if isAdmin}
+					{#if formLepasTerbuka}
+						<form class="lepas-form" onsubmit={lepasLisensi}>
+							<p class="muted">
+								Melepas lisensi mengunci aplikasi ini sampai ada kode yang dimasukkan lagi. Data
+								penjualan tidak ikut terhapus.
+							</p>
+							<label for="lepas-pw">Master password Database Manager</label>
+							<input id="lepas-pw" type="password" bind:value={lepasPassword} autocomplete="off" />
+							{#if lepasError}
+								<p class="error">{lepasError}</p>
+							{/if}
+							<div class="lepas-aksi">
+								<button type="button" onclick={() => (formLepasTerbuka = false)}>Batal</button>
+								<button type="submit" class="danger" disabled={lepasProses}>
+									{lepasProses ? 'Melepas...' : 'Lepas Lisensi'}
+								</button>
+							</div>
+						</form>
+					{:else}
+						<button onclick={() => (formLepasTerbuka = true)}>Lepas Lisensi dari Komputer Ini</button>
+						<p class="muted">
+							Dipakai kalau aplikasi mau dipindah ke komputer lain. Kode yang sama harus dimasukkan
+							ulang di komputer tujuan.
+						</p>
+					{/if}
+				{/if}
+			{:else}
+				<p class="muted">Status lisensi belum terbaca.</p>
 			{/if}
 		</section>
 
@@ -464,6 +535,29 @@
 		color: var(--danger);
 		font-size: 0.85rem;
 		margin: 0 0 0.9rem 0;
+	}
+
+	.lepas-form {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+		margin-top: 0.6rem;
+	}
+
+	.lepas-aksi {
+		display: flex;
+		gap: 0.6rem;
+		margin-top: 0.4rem;
+	}
+
+	.lepas-aksi .danger {
+		border-color: var(--danger);
+		color: var(--danger);
+	}
+
+	.lepas-aksi .danger:hover:not(:disabled) {
+		background: var(--danger);
+		color: #fff;
 	}
 
 	.muted {

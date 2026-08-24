@@ -41,6 +41,30 @@ pos-app/
 - Wajib bisa jalan offline penuh
 - Backup data ke internet (via Supabase) saat online
 
+## Lisensi (fase 21)
+
+Aplikasi terkunci sampai kode lisensi dimasukkan. Kodenya diterbitkan website penjualan
+(`../web-kios-pos`) dan **diverifikasi offline** oleh [lisensi.rs](pos-app/src-tauri/src/lisensi.rs)
+memakai public key yang ditanam di binary — tidak ada panggilan server.
+
+Kode **dikunci ke satu komputer**: payload memuat ID Mesin dan ikut ditandatangani, jadi
+kode yang disalin ke komputer lain ditolak. Aktivasinya karena itu dua langkah — app
+menampilkan ID Mesin, pembeli menukarnya di `/aktivasi` pada website bersama nomor
+pesanan. Yang butuh internet cuma langkah menukar itu, dan boleh dari HP.
+
+Spesifikasi format ada di [docs/lisensi.md](docs/lisensi.md) dan diimplementasikan
+**dua kali** (Rust di sini, TypeScript di website). Ubah satu tanpa yang lain = kode
+yang terbit tidak bisa dibaca aplikasi.
+
+- Lisensi disimpan di `app_config_dir/lisensi.json`, **bukan** di `pos.db` — kalau ikut
+  di database, Restore dari mesin lain membawa lisensi mesin itu dan "Buat Baru" akan
+  menghapus lisensi yang sah.
+- `/database-manager` sengaja tetap terbuka tanpa lisensi: mengunci aplikasi tidak boleh
+  berarti menyandera data pemilik toko.
+- Sebelum memasang versi berlisensi di mesin client yang sudah jalan, **terbitkan dulu
+  kodenya** (`npm run lisensi -- --mesin <ID>` di repo website) — kalau tidak, mesin itu
+  ikut terkunci dan pemiliknya tidak bisa jualan.
+
 ## Catatan Arsitektur
 
 - **Odoo**: requirement awal client menyebut "sistem pos menggunakan odoo", tapi diputuskan **tidak dipakai untuk sekarang** — Odoo POS hanya jadi referensi UX/fitur, bukan dependency teknis. Bisa dipertimbangkan lagi nanti kalau ada kebutuhan integrasi spesifik.

@@ -2,6 +2,7 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 
 mod db_manager;
 mod keep_awake;
+mod lisensi;
 
 fn migrations() -> Vec<Migration> {
     vec![
@@ -65,6 +66,10 @@ pub fn run() {
             db_manager::run_auto_backup_if_due,
             db_manager::get_auto_backup_dir,
             db_manager::set_auto_backup_dir,
+            lisensi::id_mesin,
+            lisensi::status_lisensi,
+            lisensi::aktivasi_lisensi,
+            lisensi::hapus_lisensi,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

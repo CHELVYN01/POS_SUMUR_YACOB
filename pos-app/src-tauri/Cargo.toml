@@ -35,6 +35,10 @@ dirs = "5"
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
 sha2 = "0.10"
 keepawake = "0.6"
+# Lisensi (fase 21): verifikasi tanda tangan offline + sidik jari mesin.
+ed25519-dalek = "2"
+base64 = "0.22"
+machine-uid = "0.5"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

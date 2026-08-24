@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { currentUser } from '$lib/stores/session';
+	import { lisensi } from '$lib/stores/lisensi';
 	import { theme, toggleTheme } from '$lib/stores/theme';
 	import { scanAktif } from '$lib/stores/scanStatus';
 	import { tokoInfo } from '$lib/stores/toko';
@@ -17,6 +18,12 @@
 	onMount(() => {
 		const unsubscribe = currentUser.subscribe((user) => {
 			if (!user) goto('/');
+		});
+
+		// Penjaga kedua, setelah yang di root layout. `null` berarti pemeriksaannya
+		// belum selesai — jangan diperlakukan sebagai "tidak berlisensi".
+		const lepasLisensi = lisensi.subscribe((status) => {
+			if (status && !status.aktif) goto('/aktivasi');
 		});
 
 		(async () => {
@@ -37,7 +44,10 @@
 			}
 		})();
 
-		return unsubscribe;
+		return () => {
+			unsubscribe();
+			lepasLisensi();
+		};
 	});
 
 	const menu = [
