@@ -14,6 +14,7 @@ type ItemRow = {
 	barang_id: number | null;
 	nama: string;
 	harga: number;
+	harga_beli: number | null;
 	jumlah: number;
 };
 
@@ -37,7 +38,7 @@ export async function listPenjualan(periode?: Periode): Promise<Penjualan[]> {
 	if (penjualanRows.length === 0) return [];
 
 	const itemRows = await db.select<ItemRow[]>(
-		`SELECT penjualan_id, barang_id, nama, harga, jumlah FROM item_penjualan
+		`SELECT penjualan_id, barang_id, nama, harga, harga_beli, jumlah FROM item_penjualan
 		 WHERE penjualan_id IN (${penjualanRows.map((p) => p.id).join(',')})`
 	);
 
@@ -53,6 +54,7 @@ export async function listPenjualan(periode?: Periode): Promise<Penjualan[]> {
 					barangId: i.barang_id ?? 0,
 					nama: i.nama,
 					harga: i.harga,
+					hargaBeli: i.harga_beli,
 					jumlah: i.jumlah
 				})
 			)
@@ -70,8 +72,19 @@ export async function simpanPenjualan(kasirId: number, items: ItemPenjualan[]): 
 	const penjualanId = result.lastInsertId as number;
 
 	for (const item of items) {
+		// Harga beli dibaca dari tabel barang SAAT INI lalu disalin ke baris transaksi,
+		// bukan diambil dari keranjang dan bukan di-JOIN saat laporan dibuka:
+		//
+		// - dari keranjang → nilainya bisa basi, keranjang bisa dibuka sejak sebelum
+		//   harga kulakannya diperbarui di halaman Produk;
+		// - JOIN saat laporan → laba bulan lalu ikut berubah sendiri setiap harga
+		//   kulakan naik, dan angka yang sudah dilaporkan tidak boleh bergerak.
+		//
+		// NULL kalau produknya belum punya harga beli — sengaja tidak dijadikan 0,
+		// karena 0 berarti "untung penuh" dan itu kebohongan yang mahal.
 		await db.execute(
-			'INSERT INTO item_penjualan (penjualan_id, barang_id, nama, harga, jumlah) VALUES ($1, $2, $3, $4, $5)',
+			`INSERT INTO item_penjualan (penjualan_id, barang_id, nama, harga, jumlah, harga_beli)
+			 VALUES ($1, $2, $3, $4, $5, (SELECT harga_beli FROM barang WHERE id = $2))`,
 			[penjualanId, item.barangId, item.nama, item.harga, item.jumlah]
 		);
 	}

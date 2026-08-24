@@ -8,7 +8,14 @@ export type User = {
 export type Barang = {
 	id: number;
 	nama: string;
+	/** Harga jual. */
 	harga: number;
+	/**
+	 * Harga beli/kulakan. `null` berarti BELUM DIISI, bukan gratis — laba barang ini
+	 * tidak ikut dihitung sampai angkanya ada. Menyamakannya dengan 0 akan membuat
+	 * seluruh harga jualnya terbaca sebagai untung.
+	 */
+	hargaBeli: number | null;
 	qty: number | null;
 	barcode: string | null;
 };
@@ -17,6 +24,8 @@ export type ItemPenjualan = {
 	barangId: number;
 	nama: string;
 	harga: number;
+	/** Harga beli saat transaksi terjadi — disalin, bukan dibaca ulang dari produk. */
+	hargaBeli?: number | null;
 	jumlah: number;
 };
 
@@ -73,10 +82,20 @@ export type Ringkasan = {
 	bonBaru: number;
 	jumlahBon: number;
 	bonDibayar: number;
+	/** Laba kotor, HANYA dari barang yang harga belinya sudah diisi. */
+	labaKotor: number;
+	/** Nilai penjualan yang labanya bisa dihitung — penyebut margin. */
+	omzetTerhitung: number;
+	/** Nilai penjualan yang harga belinya kosong, jadi labanya tidak diketahui. */
+	omzetBelumTerhitung: number;
+	/** Banyaknya baris transaksi yang harga belinya kosong. */
+	barisBelumTerhitung: number;
 };
 
 export type BarangTerjual = {
 	nama: string;
 	totalQty: number;
 	totalNilai: number;
+	/** `null` = tidak ada baris produk ini yang punya harga beli, jadi labanya tidak diketahui. */
+	totalLaba: number | null;
 };
