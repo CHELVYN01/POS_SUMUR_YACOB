@@ -6,6 +6,9 @@
 	import { setMasterPassword, getAutoBackupDir, setAutoBackupDir } from '$lib/db-manager';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { BUILD_DATE, BUILD_COMMIT, APP_VERSION, APP_AUTHOR } from '$lib/buildInfo';
+	import { stokLonggar, ubahStokLonggar } from '$lib/stores/pengaturanStok';
+	import { hitungBarangTanpaStok } from '$lib/db/barang';
+	import { toast } from '$lib/stores/toast';
 	import type { User } from '$lib/types';
 
 	let users = $state<User[]>([]);
@@ -21,6 +24,38 @@
 	let listError = $state('');
 
 	let isAdmin = $derived($currentUser?.role === 'admin');
+
+	let produkTanpaStok = $state(0);
+	let menyimpanStok = $state(false);
+
+	async function gantiModeStok(longgar: boolean, target: HTMLInputElement) {
+		// Mematikan centang ini bisa menghentikan penjualan banyak produk sekaligus.
+		// Kalau ada produk yang stoknya belum diisi, admin harus menyadarinya dulu —
+		// bukan baru tahu saat kasir tidak bisa melayani pembeli.
+		if (!longgar && produkTanpaStok > 0) {
+			const lanjut = confirm(
+				`${produkTanpaStok} produk stoknya belum diisi.\n\n` +
+					'Kalau mode stok ketat dinyalakan, produk itu TIDAK BISA DIJUAL sampai stoknya diisi ' +
+					'di halaman Produk.\n\nLanjutkan?'
+			);
+			if (!lanjut) {
+				target.checked = true;
+				return;
+			}
+		}
+
+		menyimpanStok = true;
+		try {
+			await ubahStokLonggar(longgar);
+			produkTanpaStok = await hitungBarangTanpaStok();
+			toast.sukses(longgar ? 'Mode stok longgar aktif' : 'Mode stok ketat aktif');
+		} catch (e) {
+			console.error('Gagal menyimpan pengaturan stok:', e);
+			toast.error('Gagal menyimpan pengaturan stok');
+		} finally {
+			menyimpanStok = false;
+		}
+	}
 
 	type Tab = 'umum' | 'user' | 'sinkronisasi' | 'keamanan';
 	let tab = $state<Tab>('umum');
@@ -43,6 +78,11 @@
 	onMount(async () => {
 		users = await listUsers();
 		loading = false;
+		try {
+			produkTanpaStok = await hitungBarangTanpaStok();
+		} catch (e) {
+			console.error('Gagal menghitung produk tanpa stok:', e);
+		}
 		if (isAdmin) {
 			autoBackupDir = await getAutoBackupDir();
 		}
@@ -202,6 +242,53 @@
 					<div class="me-name">{$currentUser.nama}</div>
 					<div class="me-meta">@{$currentUser.username} · {$currentUser.role}</div>
 				</div>
+			{/if}
+		</section>
+
+		<section class="card section">
+			<h2>Stok Produk</h2>
+			<label class="setel">
+				<input
+					type="checkbox"
+					checked={$stokLonggar}
+					disabled={!isAdmin || menyimpanStok}
+					onchange={(e) => gantiModeStok(e.currentTarget.checked, e.currentTarget)}
+				/>
+				<span>
+					<strong>Boleh jual walau stok habis</strong>
+					<span class="setel-desc">
+						{#if $stokLonggar}
+							Sedang aktif. Barang berstok 0 masih bisa masuk keranjang setelah kasir menyetujui
+							peringatannya, dan stok tidak wajib diisi saat menambah produk.
+						{:else}
+							Sedang mati — <strong>mode stok ketat</strong>. Barang berstok 0 atau yang stoknya
+							belum diisi ditolak, tidak bisa menjual melebihi stok, dan stok wajib diisi saat
+							menambah produk.
+						{/if}
+					</span>
+				</span>
+			</label>
+
+			<!--
+				Jumlah produk tanpa stok ditampilkan di KEDUA mode, bukan cuma saat ketat:
+				saat masih longgar ia jadi peringatan sebelum tombolnya dimatikan, saat
+				sudah ketat ia jadi daftar pekerjaan yang harus dibereskan.
+			-->
+			{#if produkTanpaStok > 0}
+				<p class="catatan">
+					{#if $stokLonggar}
+						<strong>{produkTanpaStok} produk</strong> stoknya belum diisi (tertulis "-" di Daftar
+						Produk). Kalau centang ini dimatikan, produk itu tidak bisa dijual sampai stoknya
+						diisi.
+					{:else}
+						<strong>{produkTanpaStok} produk</strong> stoknya belum diisi dan
+						<strong>sedang tidak bisa dijual</strong>. Isi stoknya lewat halaman Produk.
+					{/if}
+				</p>
+			{/if}
+
+			{#if !isAdmin}
+				<p class="muted">Hanya admin yang bisa mengubah pengaturan ini.</p>
 			{/if}
 		</section>
 
@@ -464,6 +551,40 @@
 		color: var(--danger);
 		font-size: 0.85rem;
 		margin: 0 0 0.9rem 0;
+	}
+
+	.setel {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.7rem;
+		cursor: pointer;
+	}
+
+	.setel input[type='checkbox'] {
+		width: 1.1rem;
+		height: 1.1rem;
+		margin-top: 0.15rem;
+		flex-shrink: 0;
+		cursor: pointer;
+	}
+
+	.setel-desc {
+		display: block;
+		margin-top: 0.25rem;
+		font-size: 0.85rem;
+		line-height: 1.5;
+		color: var(--text-muted);
+	}
+
+	.catatan {
+		margin: 0.9rem 0 0 0;
+		padding: 0.7rem 0.85rem;
+		border: 1px solid var(--border);
+		border-left: 3px solid var(--warning, #b54708);
+		border-radius: 6px;
+		font-size: 0.85rem;
+		line-height: 1.5;
+		color: var(--text-muted);
 	}
 
 	.muted {

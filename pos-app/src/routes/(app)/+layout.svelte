@@ -9,6 +9,7 @@
 	import { getDb } from '$lib/db';
 	import { runAutoBackupIfDue } from '$lib/db-manager';
 	import { hapusLogKedaluwarsa } from '$lib/db/log';
+	import { muatPengaturanStok } from '$lib/stores/pengaturanStok';
 	import { APP_VERSION, APP_AUTHOR } from '$lib/buildInfo';
 	import Toast from '$lib/components/Toast.svelte';
 
@@ -34,6 +35,15 @@
 				await hapusLogKedaluwarsa();
 			} catch (e) {
 				console.error('Pembersihan log gagal:', e);
+			}
+
+			// Mode stok dibaca sebelum kasir sempat menjual apa pun. Gagal membacanya
+			// berarti tetap longgar — menolak penjualan karena pengaturan tidak terbaca
+			// jauh lebih merugikan daripada meloloskan satu transaksi stok kosong.
+			try {
+				await muatPengaturanStok();
+			} catch (e) {
+				console.error('Gagal membaca pengaturan stok:', e);
 			}
 		})();
 
