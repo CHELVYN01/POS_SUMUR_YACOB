@@ -36,8 +36,22 @@
 		rataRata: 0,
 		bonBaru: 0,
 		jumlahBon: 0,
-		bonDibayar: 0
+		bonDibayar: 0,
+		labaKotor: 0,
+		omzetTerhitung: 0,
+		omzetBelumTerhitung: 0,
+		barisBelumTerhitung: 0
 	};
+
+	/**
+	 * Margin = laba dibagi omzet YANG LABANYA BISA DIHITUNG, bukan dibagi seluruh
+	 * omzet. Kalau penyebutnya seluruh omzet, penjualan yang harga belinya kosong
+	 * ikut menekan angka marginnya dan hasilnya salah ke bawah.
+	 */
+	function labelMargin(r: Ringkasan): string | undefined {
+		if (r.omzetTerhitung <= 0) return undefined;
+		return `margin ${Math.round((r.labaKotor / r.omzetTerhitung) * 100)}%`;
+	}
 
 	// --- Dashboard ---
 	let ringkasanHariIni = $state<Ringkasan>(RINGKASAN_KOSONG);
@@ -307,6 +321,21 @@
 	</table>
 {/snippet}
 
+<!--
+	Angka laba TIDAK boleh dibaca sebagai angka final selama masih ada penjualan yang
+	harga belinya kosong. Barang tanpa harga beli sengaja tidak dihitung (bukan dianggap
+	untung penuh), jadi laba yang tampil selalu lebih kecil dari yang sebenarnya —
+	dan pemilik toko harus tahu itu, bukan menebaknya.
+-->
+{#snippet peringatanLaba(r: Ringkasan)}
+	{#if r.omzetBelumTerhitung > 0}
+		<p class="peringatan-laba">
+			{formatRupiah(r.omzetBelumTerhitung)} penjualan belum dihitung labanya karena harga belinya
+			kosong. Isi Harga Beli di halaman Produk supaya angka labanya lengkap.
+		</p>
+	{/if}
+{/snippet}
+
 {#snippet kartu(label: string, nilai: string, sub?: string)}
 	<div class="kartu card">
 		<div class="kartu-label">{label}</div>
@@ -359,6 +388,11 @@
 				`${ringkasanBulan.jumlahTransaksi} transaksi`
 			)}
 			{@render kartu(
+				'Laba Bulan Ini',
+				formatRupiah(ringkasanBulan.labaKotor),
+				labelMargin(ringkasanBulan)
+			)}
+			{@render kartu(
 				'Keseluruhan',
 				formatRupiah(ringkasanSemua.totalPenjualan),
 				`${ringkasanSemua.jumlahTransaksi} transaksi`
@@ -408,6 +442,11 @@
 
 		<div class="kartu-grid">
 			{@render kartu(
+				'Laba Hari Ini',
+				formatRupiah(ringkasanHari.labaKotor),
+				labelMargin(ringkasanHari)
+			)}
+			{@render kartu(
 				'Bon Baru',
 				formatRupiah(ringkasanHari.bonBaru),
 				`${ringkasanHari.jumlahBon} bon`
@@ -419,6 +458,8 @@
 				'tunai + bon dibayar'
 			)}
 		</div>
+
+		{@render peringatanLaba(ringkasanHari)}
 
 		<div class="card panel">
 			<h3 class="section-title">Penjualan per Jam</h3>
@@ -463,11 +504,18 @@
 			)}
 			{@render kartu('Rata-rata per Transaksi', formatRupiah(ringkasanPeriodeAktif.rataRata))}
 			{@render kartu(
+				'Laba Kotor',
+				formatRupiah(ringkasanPeriodeAktif.labaKotor),
+				labelMargin(ringkasanPeriodeAktif)
+			)}
+			{@render kartu(
 				'Bon Baru',
 				formatRupiah(ringkasanPeriodeAktif.bonBaru),
 				`${ringkasanPeriodeAktif.jumlahBon} bon`
 			)}
 		</div>
+
+		{@render peringatanLaba(ringkasanPeriodeAktif)}
 
 		{#if tampilkanGrafikPeriode}
 			<div class="card panel">
@@ -618,6 +666,17 @@
 
 	.kartu {
 		padding: 0.9rem 1.1rem;
+	}
+
+	.peringatan-laba {
+		margin: 0 0 1rem 0;
+		padding: 0.7rem 0.85rem;
+		border: 1px solid var(--border);
+		border-left: 3px solid var(--warning, #b54708);
+		border-radius: 6px;
+		font-size: 0.85rem;
+		line-height: 1.5;
+		color: var(--text-muted);
 	}
 
 	.kartu-label {

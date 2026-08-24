@@ -5,6 +5,7 @@
 		cariBarang,
 		cariBarangByBarcode,
 		cariStokHabis,
+		stokBarang,
 		kurangiStokBarang
 	} from '$lib/db/barang';
 	import { catatLog as tulisLog, listLog, type LogAktivitas } from '$lib/db/log';
@@ -13,6 +14,8 @@
 	import { tandaiScan } from '$lib/stores/scanStatus';
 	import { keranjangState, nextKeranjangIdAndIncrement } from '$lib/stores/keranjang.svelte';
 	import { manualSaja } from '$lib/scanner';
+	import { stokLonggar } from '$lib/stores/pengaturanStok';
+	import { toast } from '$lib/stores/toast';
 	import type { Barang, ItemPenjualan } from '$lib/types';
 	import { formatRupiah, formatWaktu } from '$lib/utils/format';
 
@@ -144,10 +147,65 @@
 	 * sudah disetujui tidak memunculkannya lagi.
 	 */
 	function tambah(barang: Barang) {
+		if (!$stokLonggar) {
+			tambahKetat(barang);
+			return;
+		}
 		if (barang.qty === 0 && !stokDisetujui.includes(kunciStok(barang.id))) {
 			konfirmStok = barang;
 			return;
 		}
+		masukKeranjang(barang);
+	}
+
+	/**
+	 * Mode stok ketat: tidak ada pilihan "tetap tambahkan". Barang yang stoknya habis
+	 * atau tidak cukup ditolak langsung.
+	 *
+	 * Stoknya ditanya ulang ke database, bukan dipakai `barang.qty` yang menempel di
+	 * daftar: nilai itu dimuat saat halaman dibuka dan bisa sudah berkurang lewat
+	 * keranjang lain atau lewat halaman Produk.
+	 *
+	 * qty NULL ikut ditolak: di mode ketat, "stok belum diisi" bukan alasan untuk
+	 * melewatkan pemeriksaan — justru itu yang harus dibereskan. Konsekuensinya
+	 * produk lama yang stoknya belum pernah diisi berhenti bisa dijual sampai
+	 * stoknya diisi, dan halaman Pengaturan memperingatkan hal itu sebelum
+	 * mode ini dinyalakan.
+	 */
+	async function tambahKetat(barang: Barang) {
+		const diKeranjang = activeKeranjang.cart.find((c) => c.barangId === barang.id)?.jumlah ?? 0;
+
+		let stok: number | null | undefined;
+		try {
+			stok = (await stokBarang([barang.id])).get(barang.id);
+		} catch (e) {
+			// Gagal membaca stok jangan menghentikan penjualan — kasir sedang melayani
+			// pembeli, dan kesalahan baca database bukan urusan dia.
+			console.error('Gagal memeriksa stok:', e);
+			masukKeranjang(barang);
+			return;
+		}
+
+		if (stok === null || stok === undefined) {
+			toast.error(`Stok ${barang.nama} belum diisi — isi dulu di halaman Produk`);
+			catatLog(`[${activeKeranjang.nama}] Ditolak: ${barang.nama} stok belum diisi`);
+			refocusScan();
+			return;
+		}
+
+		if (stok <= 0) {
+			toast.error(`Stok ${barang.nama} habis — tidak bisa dijual`);
+			catatLog(`[${activeKeranjang.nama}] Ditolak: ${barang.nama} stok habis`);
+			refocusScan();
+			return;
+		}
+
+		if (diKeranjang + 1 > stok) {
+			toast.error(`Stok ${barang.nama} tinggal ${stok}, sudah semua ada di keranjang`);
+			refocusScan();
+			return;
+		}
+
 		masukKeranjang(barang);
 	}
 
@@ -175,12 +233,30 @@
 		tambah(barang);
 	}
 
-	function tambahJumlah(barangId: number) {
+	async function tambahJumlah(barangId: number) {
 		const existing = activeKeranjang.cart.find((c) => c.barangId === barangId);
-		if (existing) {
-			existing.jumlah += 1;
-			catatLog(`[${activeKeranjang.nama}] Tambah ${existing.nama} x1`);
+		if (!existing) return;
+
+		// Tombol + juga harus dibatasi di mode ketat, kalau tidak batas stoknya bisa
+		// dilewati begitu saja dari keranjang.
+		if (!$stokLonggar) {
+			try {
+				const stok = (await stokBarang([barangId])).get(barangId);
+				if (stok === null || stok === undefined) {
+					toast.error(`Stok ${existing.nama} belum diisi — isi dulu di halaman Produk`);
+					return;
+				}
+				if (existing.jumlah + 1 > stok) {
+					toast.error(`Stok ${existing.nama} tinggal ${stok}`);
+					return;
+				}
+			} catch (e) {
+				console.error('Gagal memeriksa stok:', e);
+			}
 		}
+
+		existing.jumlah += 1;
+		catatLog(`[${activeKeranjang.nama}] Tambah ${existing.nama} x1`);
 	}
 
 	function kurangi(barangId: number) {
@@ -299,6 +375,44 @@
 	 */
 	async function klikBayar() {
 		if (cart.length === 0) return;
+
+		// Mode ketat: jaring pengaman terakhir, tanpa pilihan melanjutkan. Stok bisa
+		// habis setelah barangnya masuk keranjang — terjual lewat keranjang lain, atau
+		// diubah dari halaman Produk.
+		if (!$stokLonggar) {
+			try {
+				const stok = await stokBarang(cart.map((i) => i.barangId));
+
+				const belumDiisi = cart.filter((i) => {
+					const s = stok.get(i.barangId);
+					return s === null || s === undefined;
+				});
+				if (belumDiisi.length > 0) {
+					const nama = belumDiisi.map((i) => i.nama).join(', ');
+					toast.error(`Stok belum diisi: ${nama}. Isi dulu di halaman Produk.`);
+					catatLog(`[${activeKeranjang.nama}] Bayar ditolak, stok belum diisi: ${nama}`);
+					return;
+				}
+
+				const kurang = cart.filter((i) => {
+					const s = stok.get(i.barangId);
+					return s !== null && s !== undefined && i.jumlah > s;
+				});
+				if (kurang.length > 0) {
+					const rincian = kurang
+						.map((i) => `${i.nama} (minta ${i.jumlah}, stok ${stok.get(i.barangId)})`)
+						.join(', ');
+					toast.error(`Stok tidak cukup: ${rincian}`);
+					catatLog(`[${activeKeranjang.nama}] Bayar ditolak, stok tidak cukup: ${rincian}`);
+					return;
+				}
+			} catch (e) {
+				console.error('Gagal memeriksa stok:', e);
+			}
+			bayar();
+			return;
+		}
+
 		try {
 			const habis = await cariStokHabis(cart.map((item) => item.barangId));
 			// Yang sudah ditanyakan saat masuk keranjang tidak ditanya dua kali. Sisanya

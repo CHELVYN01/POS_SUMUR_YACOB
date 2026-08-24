@@ -13,6 +13,7 @@
 		type RencanaImport
 	} from '$lib/db/barang';
 	import { exportProdukExcel, bacaProdukExcel, ImportError } from '$lib/export/produk';
+	import { stokLonggar } from '$lib/stores/pengaturanStok';
 	import { catatLog as tulisLog, listLog, type LogAktivitas } from '$lib/db/log';
 	import { currentUser } from '$lib/stores/session';
 	import { manualSaja } from '$lib/scanner';
@@ -100,6 +101,18 @@
 	let barcode = $state('');
 	let nama = $state('');
 	let harga = $state<number | undefined>(undefined);
+	let hargaBeli = $state<number | undefined>(undefined);
+
+	/**
+	 * Margin ditampilkan hidup saat mengetik — pemilik toko langsung sadar kalau
+	 * harga jualnya ternyata di bawah modal, tanpa perlu buka Laporan dulu.
+	 */
+	let margin = $derived.by(() => {
+		if (harga === undefined || hargaBeli === undefined) return null;
+		const untung = harga - hargaBeli;
+		const persen = hargaBeli > 0 ? Math.round((untung / hargaBeli) * 100) : null;
+		return { untung, persen };
+	});
 	let qty = $state<number | undefined>(undefined);
 	let editId = $state<number | null>(null);
 	let editSebelum = $state<Barang | null>(null);
@@ -136,7 +149,13 @@
 		// selagi pratinjau import terbuka, kolom barcode ada di belakang overlay —
 		// menariknya kembali fokus bikin ketikan/scan mendarat di kolom yang tak terlihat
 		if (rencana !== null) return;
-		const formKosong = editId === null && !barcode && !nama && harga === undefined && qty === undefined;
+		const formKosong =
+			editId === null &&
+			!barcode &&
+			!nama &&
+			harga === undefined &&
+			hargaBeli === undefined &&
+			qty === undefined;
 		if (!formKosong) return;
 
 		const active = document.activeElement;
@@ -159,7 +178,13 @@
 
 	function ringkasPerubahan(
 		sebelum: Barang | null,
-		sesudah: { nama: string; harga: number; qty: number | null; barcode: string | null }
+		sesudah: {
+			nama: string;
+			harga: number;
+			hargaBeli: number | null;
+			qty: number | null;
+			barcode: string | null;
+		}
 	): string {
 		if (!sebelum) return '';
 		const perubahan: string[] = [];
@@ -168,7 +193,12 @@
 			perubahan.push(`nama: "${sebelum.nama}" → "${sesudah.nama}"`);
 		}
 		if (sebelum.harga !== sesudah.harga) {
-			perubahan.push(`harga: ${formatRupiah(sebelum.harga)} → ${formatRupiah(sesudah.harga)}`);
+			perubahan.push(`harga jual: ${formatRupiah(sebelum.harga)} → ${formatRupiah(sesudah.harga)}`);
+		}
+		if (sebelum.hargaBeli !== sesudah.hargaBeli) {
+			const dari = sebelum.hargaBeli === null ? '-' : formatRupiah(sebelum.hargaBeli);
+			const ke = sesudah.hargaBeli === null ? '-' : formatRupiah(sesudah.hargaBeli);
+			perubahan.push(`harga beli: ${dari} → ${ke}`);
 		}
 		if (sebelum.qty !== sesudah.qty) {
 			const lama = sebelum.qty === null ? '-' : sebelum.qty;
@@ -273,6 +303,11 @@
 			formError = 'Nama produk wajib diisi';
 			return;
 		}
+		if (!$stokLonggar && qty === undefined) {
+			formError = 'Stok wajib diisi selama mode stok ketat menyala';
+			return;
+		}
+
 		if (harga === undefined) {
 			formError = 'Harga wajib diisi';
 			return;
@@ -284,7 +319,15 @@
 
 		const qtyNum = qty === undefined ? null : qty;
 		const barcodeVal = barcode.trim();
-		const input = { nama: nama.trim(), harga, qty: qtyNum, barcode: barcodeVal };
+		const input = {
+			nama: nama.trim(),
+			harga,
+			// Dikosongkan tetap null, tidak dijadikan 0 — 0 berarti barangnya gratis
+			// dan produknya akan terbaca untung penuh di laporan laba.
+			hargaBeli: hargaBeli === undefined ? null : hargaBeli,
+			qty: qtyNum,
+			barcode: barcodeVal
+		};
 
 		// Kolom barcode UNIQUE di database, jadi duplikat akan ditolak SQLite dengan
 		// error mentah. Dicegat di sini supaya pesannya jelas dan menyebut produknya.
@@ -332,6 +375,7 @@
 		barcodeTerkunci = barang.barcode ?? null;
 		nama = barang.nama;
 		harga = barang.harga;
+		hargaBeli = barang.hargaBeli ?? undefined;
 		qty = barang.qty ?? undefined;
 		formError = '';
 	}
@@ -391,7 +435,7 @@
 			const hasil = await bacaProdukExcel();
 			if (!hasil) return; // dialog ditutup user
 
-			const r = await siapkanImportBarang(hasil.baris, hasil.error);
+			const r = await siapkanImportBarang(hasil.baris, hasil.error, hasil.adaKolomHargaBeli);
 			if (r.baru.length === 0 && r.ubah.length === 0 && r.error.length === 0) {
 				toast.info(
 					r.sama > 0
@@ -460,6 +504,7 @@
 		barcodeTerkunci = null;
 		nama = '';
 		harga = undefined;
+		hargaBeli = undefined;
 		qty = undefined;
 		formError = '';
 	}
@@ -502,7 +547,17 @@
 					use:manualSaja={alihkanScan}
 				/>
 
-				<label for="harga">Harga (Rp) <span class="opt required">(wajib)</span></label>
+				<label for="harga-beli">Harga Beli / Modal (Rp) <span class="opt">(opsional)</span></label>
+				<input
+					id="harga-beli"
+					type="number"
+					min="0"
+					bind:value={hargaBeli}
+					placeholder="kosongkan jika belum tahu"
+					use:manualSaja={alihkanScan}
+				/>
+
+				<label for="harga">Harga Jual (Rp) <span class="opt required">(wajib)</span></label>
 				<input
 					id="harga"
 					type="number"
@@ -512,13 +567,29 @@
 					use:manualSaja={alihkanScan}
 				/>
 
-				<label for="qty">Stok / Qty <span class="opt">(opsional)</span></label>
+				{#if margin}
+					<p class="margin" class:rugi={margin.untung < 0}>
+						{margin.untung < 0 ? 'Rugi' : 'Untung'}
+						{formatRupiah(Math.abs(margin.untung))} per barang{margin.persen === null
+							? ''
+							: ` · ${margin.untung < 0 ? '-' : ''}${Math.abs(margin.persen)}%`}
+					</p>
+				{/if}
+
+				<label for="qty">
+					Stok / Qty
+					{#if $stokLonggar}
+						<span class="opt">(opsional)</span>
+					{:else}
+						<span class="opt required">(wajib)</span>
+					{/if}
+				</label>
 				<input
 					id="qty"
 					type="number"
 					min="0"
 					bind:value={qty}
-					placeholder="kosongkan jika tidak dihitung"
+					placeholder={$stokLonggar ? 'kosongkan jika tidak dihitung' : 'mis. 20'}
 					use:manualSaja={alihkanScan}
 				/>
 
@@ -595,17 +666,19 @@
 					<tr>
 						<th>Nama Produk</th>
 						<th>Barcode</th>
-						<th>Harga</th>
+						<th>Harga Beli</th>
+						<th>Harga Jual</th>
+						<th>Untung</th>
 						<th>Stok</th>
 						<th></th>
 					</tr>
 				</thead>
 				<tbody>
 					{#if loading}
-						<tr><td colspan="5" class="empty">Memuat data...</td></tr>
+						<tr><td colspan="7" class="empty">Memuat data...</td></tr>
 					{:else if barangList.length === 0}
 						<tr>
-							<td colspan="5" class="empty">
+							<td colspan="7" class="empty">
 								{cariAktif ? `Tidak ada produk cocok dengan "${cariAktif}"` : 'Belum ada produk'}
 							</td>
 						</tr>
@@ -614,7 +687,13 @@
 							<tr>
 								<td>{barang.nama}</td>
 								<td class="mono">{barang.barcode ?? '-'}</td>
+								<td class:kosong={barang.hargaBeli === null}>
+									{barang.hargaBeli === null ? 'belum diisi' : formatRupiah(barang.hargaBeli)}
+								</td>
 								<td>{formatRupiah(barang.harga)}</td>
+								<td class:rugi={barang.hargaBeli !== null && barang.harga < barang.hargaBeli}>
+									{barang.hargaBeli === null ? '-' : formatRupiah(barang.harga - barang.hargaBeli)}
+								</td>
 								<td>{barang.qty === null ? '-' : barang.qty}</td>
 								<td class="action">
 									<button onclick={() => edit(barang)}>Edit</button>
@@ -798,6 +877,25 @@
 		flex-shrink: 0;
 		padding: 0 0.8em;
 		font-size: 0.85rem;
+	}
+
+	.margin {
+		margin: 0.2rem 0 0 0;
+		font-size: 0.82rem;
+		color: var(--text-muted);
+	}
+
+	.margin.rugi,
+	td.rugi {
+		color: var(--danger);
+		font-weight: 600;
+	}
+
+	/* Produk yang belum diisi harga belinya harus kelihatan sekilas — itu yang
+	   bikin angka laba di Laporan belum lengkap. */
+	td.kosong {
+		color: var(--text-muted);
+		font-style: italic;
 	}
 
 	.error {
