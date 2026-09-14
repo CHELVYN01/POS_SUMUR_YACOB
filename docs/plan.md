@@ -356,6 +356,19 @@ plan fix 8 ✅ (dicatat di list_done sebagai fix 17)
   baru habis setelah masuk keranjang (mis. terjual lewat keranjang lain)
 
 
+
+## plan fixing affter production 
+
+plan fase 1 
+- saya ingin laporan itu bisa di lihat dari di hide dimana menggunakan pengaturan. nah dimana kita bisa centang di pengaturan 
+untuk user ini hanya melihat laporan per hari ini. gitu dan untuk user admin itu dia melihat semua gitu kaya odoo ada hak akses gitu 
+
+dan user juga tidak ada buttom pengaturan agar dia tidak bisa setting sembarang, hooo lebih bagus nya untuk user biasa itu hanya muncul pengaturan umum gitu 
+
+- untuk fitur stock barang di pengatruan itu di pindahkan ke tab product gitu dan buat juga tab laporan gitu yah 
+
+
+
 ## wajib saya running sendiri 
 
 

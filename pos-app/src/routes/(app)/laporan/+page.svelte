@@ -25,10 +25,28 @@
 		type Periode,
 		type PresetPeriode
 	} from '$lib/utils/periode';
+	import { currentUser } from '$lib/stores/session';
+	import { laporanKasirHariIni } from '$lib/stores/pengaturanLaporan';
 	import type { BarangTerjual, KasBon, Penjualan, Ringkasan, TitikGrafik } from '$lib/types';
 
 	type Tab = 'dashboard' | 'hariIni' | 'keseluruhan' | 'bon';
 	let tab = $state<Tab>('dashboard');
+
+	/**
+	 * Pembatasan "hanya laporan hari ini" (Pengaturan > Laporan). Admin selalu
+	 * bebas; yang dibatasi hanya role kasir.
+	 */
+	let dibatasi = $derived($currentUser?.role !== 'admin' && $laporanKasirHariIni);
+
+	/**
+	 * Tab yang benar-benar dirender. Pengaturannya dibaca asinkron saat aplikasi
+	 * dibuka, jadi `dibatasi` bisa berubah dari false ke true SETELAH halaman ini
+	 * tampil. Menurunkan tab (bukan menimpanya lewat $effect) memastikan tab
+	 * terlarang tidak sempat dirender maupun menjalankan query-nya sedetik pun.
+	 */
+	let tabAktif = $derived<Tab>(
+		dibatasi && (tab === 'dashboard' || tab === 'keseluruhan') ? 'hariIni' : tab
+	);
 
 	const RINGKASAN_KOSONG: Ringkasan = {
 		totalPenjualan: 0,
@@ -181,13 +199,13 @@
 	// Data dimuat saat tabnya dibuka, bukan sekaligus di awal — tiap tab punya
 	// query sendiri dan kasir biasanya cuma melihat satu tab.
 	$effect(() => {
-		if (tab === 'dashboard') muatDashboard();
-		else if (tab === 'hariIni') muatHariIni();
-		else if (tab === 'bon') muatBon();
+		if (tabAktif === 'dashboard') muatDashboard();
+		else if (tabAktif === 'hariIni') muatHariIni();
+		else if (tabAktif === 'bon') muatBon();
 	});
 
 	$effect(() => {
-		if (tab !== 'keseluruhan') return;
+		if (tabAktif !== 'keseluruhan') return;
 		muatKeseluruhan(periodeAktif, tampilkanGrafikPeriode);
 	});
 
@@ -198,8 +216,8 @@
 	$effect(() => {
 		const id = setInterval(() => {
 			if (tanggalHariIni() === tanggalAktif) return;
-			if (tab === 'hariIni') muatHariIni();
-			else if (tab === 'dashboard') muatDashboard();
+			if (tabAktif === 'hariIni') muatHariIni();
+			else if (tabAktif === 'dashboard') muatDashboard();
 			else tanggalAktif = tanggalHariIni();
 		}, 60_000);
 		return () => clearInterval(id);
@@ -217,10 +235,16 @@
 			let p: Periode | undefined;
 			let label: string | undefined;
 
-			if (tab === 'hariIni') {
+			if (dibatasi) {
+				// Tanpa ini, ekspor dari tab Kas Bon jatuh ke `p = undefined` — artinya
+				// SELURUH riwayat penjualan ikut terbawa ke file Excel, persis data yang
+				// pembatasan ini maksudkan untuk tidak terlihat.
 				p = hariIni();
 				label = labelPeriode(p);
-			} else if (tab === 'keseluruhan' && preset !== 'semua') {
+			} else if (tabAktif === 'hariIni') {
+				p = hariIni();
+				label = labelPeriode(p);
+			} else if (tabAktif === 'keseluruhan' && preset !== 'semua') {
 				p = periodeAktif;
 				label = labelPeriodeAktif;
 			}
@@ -357,25 +381,33 @@
 	{/if}
 
 	<div class="tabs">
-		<button class="tab-btn" class:active={tab === 'dashboard'} onclick={() => (tab = 'dashboard')}>
-			Dashboard
-		</button>
-		<button class="tab-btn" class:active={tab === 'hariIni'} onclick={() => (tab = 'hariIni')}>
+		{#if !dibatasi}
+			<button
+				class="tab-btn"
+				class:active={tabAktif === 'dashboard'}
+				onclick={() => (tab = 'dashboard')}
+			>
+				Dashboard
+			</button>
+		{/if}
+		<button class="tab-btn" class:active={tabAktif === 'hariIni'} onclick={() => (tab = 'hariIni')}>
 			Hari Ini
 		</button>
-		<button
-			class="tab-btn"
-			class:active={tab === 'keseluruhan'}
-			onclick={() => (tab = 'keseluruhan')}
-		>
-			Keseluruhan
-		</button>
-		<button class="tab-btn" class:active={tab === 'bon'} onclick={() => (tab = 'bon')}>
+		{#if !dibatasi}
+			<button
+				class="tab-btn"
+				class:active={tabAktif === 'keseluruhan'}
+				onclick={() => (tab = 'keseluruhan')}
+			>
+				Keseluruhan
+			</button>
+		{/if}
+		<button class="tab-btn" class:active={tabAktif === 'bon'} onclick={() => (tab = 'bon')}>
 			Kas Bon
 		</button>
 	</div>
 
-	{#if tab === 'dashboard'}
+	{#if tabAktif === 'dashboard'}
 		<div class="kartu-grid">
 			{@render kartu(
 				'Hari Ini',
@@ -431,7 +463,7 @@
 		{/if}
 	{/if}
 
-	{#if tab === 'hariIni'}
+	{#if tabAktif === 'hariIni'}
 		<div class="hero card">
 			<div class="hero-label">Penjualan Hari Ini · {formatTanggalLokal(tanggalAktif)}</div>
 			<div class="hero-nilai">{formatRupiah(ringkasanHari.totalPenjualan)}</div>
@@ -470,7 +502,7 @@
 		{@render tabelPenjualan(penjualanHari, memuatHari)}
 	{/if}
 
-	{#if tab === 'keseluruhan'}
+	{#if tabAktif === 'keseluruhan'}
 		<div class="filter">
 			{#each PRESET as p (p.nilai)}
 				<button
@@ -528,7 +560,7 @@
 		{@render tabelPenjualan(penjualanPeriode, memuatPeriode)}
 	{/if}
 
-	{#if tab === 'bon'}
+	{#if tabAktif === 'bon'}
 		<div class="summary card">
 			<div>
 				<div class="summary-label">Total Bon</div>

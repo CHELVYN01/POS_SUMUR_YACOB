@@ -10,6 +10,7 @@
 	import { runAutoBackupIfDue } from '$lib/db-manager';
 	import { hapusLogKedaluwarsa } from '$lib/db/log';
 	import { muatPengaturanStok } from '$lib/stores/pengaturanStok';
+	import { laporanKasirHariIni, muatPengaturanLaporan } from '$lib/stores/pengaturanLaporan';
 	import { APP_VERSION, APP_AUTHOR } from '$lib/buildInfo';
 	import Toast from '$lib/components/Toast.svelte';
 
@@ -44,6 +45,16 @@
 				await muatPengaturanStok();
 			} catch (e) {
 				console.error('Gagal membaca pengaturan stok:', e);
+			}
+
+			// Hak akses laporan justru sebaliknya: gagal membacanya berarti MEMBATASI.
+			// Salah menyembunyikan laporan cuma bikin kasir harus memanggil admin;
+			// salah membukanya berarti angka omzet & laba terlanjur terlihat.
+			try {
+				await muatPengaturanLaporan();
+			} catch (e) {
+				console.error('Gagal membaca pengaturan laporan:', e);
+				laporanKasirHariIni.set(true);
 			}
 		})();
 

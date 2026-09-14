@@ -22,11 +22,13 @@ export async function login(username: string, password: string): Promise<User | 
 	return rows[0] ?? null;
 }
 
-export async function usernameTersedia(username: string): Promise<boolean> {
+/** `kecualiId` = user yang sedang diedit; username miliknya sendiri bukan bentrokan. */
+export async function usernameTersedia(username: string, kecualiId?: number): Promise<boolean> {
 	const db = await getDb();
-	const rows = await db.select<{ id: number }[]>('SELECT id FROM users WHERE username = $1', [
-		username
-	]);
+	const rows = await db.select<{ id: number }[]>(
+		'SELECT id FROM users WHERE username = $1 AND ($2 IS NULL OR id != $2)',
+		[username, kecualiId ?? null]
+	);
 	return rows.length === 0;
 }
 
@@ -50,6 +52,43 @@ async function jumlahAdmin(): Promise<number> {
 		"SELECT COUNT(*) as total FROM users WHERE role = 'admin'"
 	);
 	return rows[0]?.total ?? 0;
+}
+
+/**
+ * Password hanya diganti kalau diisi — kosong berarti tetap yang lama, supaya
+ * mengubah nama/role tidak memaksa admin mengetik ulang password orang.
+ */
+export async function ubahUser(
+	id: number,
+	input: { nama: string; username: string; role: 'admin' | 'kasir'; password?: string }
+): Promise<{ ok: boolean; error?: string }> {
+	const db = await getDb();
+	const rows = await db.select<UserRow[]>('SELECT id, nama, username, role FROM users WHERE id = $1', [
+		id
+	]);
+	const target = rows[0];
+	if (!target) return { ok: false, error: 'User tidak ditemukan' };
+
+	// Menurunkan admin terakhir jadi kasir sama saja dengan menghapusnya:
+	// tidak ada lagi yang bisa membuka Pengaturan.
+	if (target.role === 'admin' && input.role !== 'admin' && (await jumlahAdmin()) <= 1) {
+		return { ok: false, error: 'Tidak bisa mengubah role satu-satunya admin' };
+	}
+
+	if (input.password) {
+		await db.execute(
+			'UPDATE users SET nama = $1, username = $2, role = $3, password = $4 WHERE id = $5',
+			[input.nama, input.username, input.role, input.password, id]
+		);
+	} else {
+		await db.execute('UPDATE users SET nama = $1, username = $2, role = $3 WHERE id = $4', [
+			input.nama,
+			input.username,
+			input.role,
+			id
+		]);
+	}
+	return { ok: true };
 }
 
 export async function hapusUser(id: number): Promise<{ ok: boolean; error?: string }> {

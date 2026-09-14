@@ -40,3 +40,19 @@ export async function bacaStokLonggar(): Promise<boolean> {
 export async function simpanStokLonggar(longgar: boolean): Promise<void> {
 	await simpanPengaturan(KUNCI_STOK_LONGGAR, longgar ? '1' : '0');
 }
+
+export const KUNCI_LAPORAN_KASIR_HARI_INI = 'laporan_kasir_hari_ini';
+
+/**
+ * true = user non-admin hanya boleh melihat laporan hari ini.
+ *
+ * Kebalikan dari stok: nilai yang belum pernah tersimpan dianggap TIDAK dibatasi,
+ * supaya upgrade aplikasi tidak menutup sendiri halaman yang kemarin masih terbuka.
+ */
+export async function bacaLaporanKasirHariIni(): Promise<boolean> {
+	return (await bacaPengaturan(KUNCI_LAPORAN_KASIR_HARI_INI)) === '1';
+}
+
+export async function simpanLaporanKasirHariIni(batasi: boolean): Promise<void> {
+	await simpanPengaturan(KUNCI_LAPORAN_KASIR_HARI_INI, batasi ? '1' : '0');
+}
