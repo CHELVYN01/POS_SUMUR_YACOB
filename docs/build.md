@@ -72,8 +72,17 @@ Windows, tidak perlu PC Linux, tidak perlu Docker, tidak perlu install apa pun
 di Mac.
 
 Definisinya ada di [`.github/workflows/build.yml`](../.github/workflows/build.yml).
-Satu workflow, dua job build (`windows` dan `linux`) yang jalan berbarengan,
-lalu satu job `release` yang mengumpulkan hasil keduanya.
+Satu workflow: job `versi` membaca versi dari `tauri.conf.json` dan (kalau
+versinya belum pernah dirilis) menyiapkan **draft Release** kosong, lalu dua job
+build (`windows` dan `linux`) jalan berbarengan dan masing-masing mengunggah
+installernya langsung ke draft itu.
+
+Installer sengaja **tidak** dititipkan ke artifact storage saat rilis: kuota
+storage Actions cuma 500 MB, satu run ~350 MB (installer Windows membawa
+WebView2 offline), dan begitu penuh upload gagal dengan *"Artifact storage
+quota has been hit"* — kuotanya baru dihitung ulang 6–12 jam setelah
+dibersihkan. Aset Release tidak masuk kuota itu. Artifact hanya dipakai untuk
+build percobaan (Cara A), dengan retensi 1 hari.
 
 ### Cara A — build percobaan (paling sering dipakai)
 
@@ -90,14 +99,19 @@ Isinya file `.zip` berisi installer. Extract, lalu kirim ke client.
 
 ### Cara B — rilis resmi
 
-```bash
-git tag v0.1.8
-git push origin v0.1.8
-```
+Naikkan versinya, commit, lalu `git push origin master`. Workflow jalan
+otomatis: karena versi di `tauri.conf.json` belum punya tag, ia membuat
+**draft release** di halaman Releases lengkap dengan installer Windows *dan*
+Linux terlampir. Draft — jadi kamu bisa periksa dulu sebelum klik Publish;
+tag `v<versi>` baru benar-benar dibuat saat Publish.
 
-Workflow jalan otomatis dan membuat **draft release** di halaman Releases
-lengkap dengan installer Windows *dan* Linux terlampir. Draft — jadi kamu bisa
-periksa dulu sebelum klik Publish.
+Push tag manual (`git tag v0.1.8 && git push origin v0.1.8`) masih didukung,
+tapi tag-nya wajib cocok dengan versi di `tauri.conf.json` atau run-nya
+digagalkan lebih dulu.
+
+Kalau salah satu job build gagal, draft-nya tetap ada tapi hanya berisi
+installer dari job yang berhasil — klik **Re-run failed jobs**, hasilnya
+diunggah ke draft yang sama (menimpa file yang namanya sama).
 
 > Naikkan dulu `version` di keempat tempat (`package.json`,
 > `package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`)
