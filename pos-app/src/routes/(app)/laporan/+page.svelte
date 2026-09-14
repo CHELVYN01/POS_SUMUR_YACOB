@@ -36,7 +36,8 @@
 	 * Pembatasan "hanya laporan hari ini" (Pengaturan > Laporan). Admin selalu
 	 * bebas; yang dibatasi hanya role kasir.
 	 */
-	let dibatasi = $derived($currentUser?.role !== 'admin' && $laporanKasirHariIni);
+	let adminAktif = $derived($currentUser?.role === 'admin');
+	let dibatasi = $derived(!adminAktif && $laporanKasirHariIni);
 
 	/**
 	 * Tab yang benar-benar dirender. Pengaturannya dibaca asinkron saat aplikasi
@@ -472,12 +473,15 @@
 			</div>
 		</div>
 
+		<!-- Laba hanya untuk admin — kasir tidak perlu tahu margin toko. -->
 		<div class="kartu-grid">
-			{@render kartu(
-				'Laba Hari Ini',
-				formatRupiah(ringkasanHari.labaKotor),
-				labelMargin(ringkasanHari)
-			)}
+			{#if adminAktif}
+				{@render kartu(
+					'Laba Hari Ini',
+					formatRupiah(ringkasanHari.labaKotor),
+					labelMargin(ringkasanHari)
+				)}
+			{/if}
 			{@render kartu(
 				'Bon Baru',
 				formatRupiah(ringkasanHari.bonBaru),
@@ -491,7 +495,9 @@
 			)}
 		</div>
 
-		{@render peringatanLaba(ringkasanHari)}
+		{#if adminAktif}
+			{@render peringatanLaba(ringkasanHari)}
+		{/if}
 
 		<div class="card panel">
 			<h3 class="section-title">Penjualan per Jam</h3>
