@@ -161,6 +161,12 @@ jobs:
         with:
           name: pos-sumur-yacob-windows
           if-no-files-found: error
+          # Artifact ini cuma estafet ke job release — installernya sendiri
+          # tersimpan permanen di halaman Releases. Dengan retensi bawaan 90 hari,
+          # tiap run menyimpan ~350 MB (WebView2 offline ikut di-embed) dan kuota
+          # storage Actions (500 MB) penuh setelah 2 run: "Artifact storage quota
+          # has been hit" lalu upload gagal dan release tidak pernah terbuat.
+          retention-days: 1
           path: |
             pos-app/src-tauri/target/release/bundle/nsis/*.exe
             pos-app/src-tauri/target/release/bundle/msi/*.msi
@@ -244,6 +250,7 @@ jobs:
         with:
           name: pos-sumur-yacob-linux
           if-no-files-found: error
+          retention-days: 1 # lihat catatan di job windows
           path: |
             pos-app/src-tauri/target/release/bundle/deb/*.deb
             pos-app/src-tauri/target/release/bundle/appimage/*.AppImage
