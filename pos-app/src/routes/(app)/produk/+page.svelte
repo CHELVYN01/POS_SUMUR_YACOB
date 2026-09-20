@@ -964,11 +964,28 @@
 		onclick={(e) => e.stopPropagation()}
 		onkeydown={() => {}}
 	>
-		<button role="menuitem" onclick={() => { menuBarisId = null; edit(barangMenu); }}>Edit</button>
+		<!-- Produknya diambil DULU, baru menunya ditutup. `barangMenu` diturunkan dari
+		     `menuBarisId`, jadi menutup menu lebih dulu membuatnya null dan edit()
+		     menerima null — panelnya tidak pernah terbuka. Sama seperti tombol Hapus
+		     di bawah ini. -->
+		<button
+			role="menuitem"
+			onclick={() => {
+				const target = barangMenu;
+				menuBarisId = null;
+				if (target) edit(target);
+			}}
+		>
+			Edit
+		</button>
 		<button
 			class="menu-hapus"
 			role="menuitem"
-			onclick={() => { const id = barangMenu.id; menuBarisId = null; hapus(id); }}
+			onclick={() => {
+				const target = barangMenu;
+				menuBarisId = null;
+				if (target) hapus(target.id);
+			}}
 		>
 			Hapus
 		</button>
