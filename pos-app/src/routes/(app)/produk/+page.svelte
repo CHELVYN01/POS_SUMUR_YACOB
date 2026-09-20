@@ -12,13 +12,14 @@
 		terapkanImportBarang,
 		type RencanaImport
 	} from '$lib/db/barang';
+	import { listKategori } from '$lib/db/kategori';
 	import { exportProdukExcel, bacaProdukExcel, ImportError } from '$lib/export/produk';
 	import { stokLonggar } from '$lib/stores/pengaturanStok';
 	import { catatLog as tulisLog, listLog, type LogAktivitas } from '$lib/db/log';
 	import { currentUser } from '$lib/stores/session';
 	import { manualSaja } from '$lib/scanner';
 	import { toast } from '$lib/stores/toast';
-	import type { Barang } from '$lib/types';
+	import type { Barang, Kategori } from '$lib/types';
 	import { formatRupiah, formatWaktu } from '$lib/utils/format';
 
 	const PER_HALAMAN = 100;
@@ -154,6 +155,8 @@
 		return { untung, persen };
 	});
 	let qty = $state<number | undefined>(undefined);
+	/** '' = tanpa kategori. Disimpan sebagai string karena itu yang dipakai <select>. */
+	let kategoriId = $state('');
 	let editId = $state<number | null>(null);
 	let editSebelum = $state<Barang | null>(null);
 
@@ -179,6 +182,16 @@
 
 	let log = $state<LogAktivitas[]>([]);
 	let formError = $state('');
+
+	let daftarKategori = $state<Kategori[]>([]);
+
+	async function muatKategori() {
+		try {
+			daftarKategori = await listKategori();
+		} catch (e) {
+			console.error('Gagal memuat kategori:', e);
+		}
+	}
 
 	async function muatLog() {
 		try {
@@ -217,6 +230,7 @@
 
 	onMount(() => {
 		muatLog();
+		muatKategori();
 
 		const handler = () => setTimeout(refocusBarcode, 50);
 		document.addEventListener('focusout', handler);
@@ -228,6 +242,12 @@
 		};
 	});
 
+	/** Nama kategori dari id-nya, untuk ditulis di log — id mentah tidak berarti apa-apa. */
+	function namaKategori(id: number | null): string {
+		if (id === null) return '-';
+		return daftarKategori.find((k) => k.id === id)?.nama ?? '-';
+	}
+
 	function ringkasPerubahan(
 		sebelum: Barang | null,
 		sesudah: {
@@ -236,6 +256,7 @@
 			hargaBeli: number | null;
 			qty: number | null;
 			barcode: string | null;
+			kategoriId: number | null;
 		}
 	): string {
 		if (!sebelum) return '';
@@ -261,6 +282,11 @@
 			const lama = sebelum.barcode ?? '-';
 			const baru = sesudah.barcode ?? '-';
 			perubahan.push(`barcode: ${lama} → ${baru}`);
+		}
+		if (sebelum.kategoriId !== sesudah.kategoriId) {
+			perubahan.push(
+				`kategori: ${sebelum.kategoriNama ?? '-'} → ${namaKategori(sesudah.kategoriId)}`
+			);
 		}
 
 		return perubahan.length > 0 ? ` (${perubahan.join(', ')})` : ' (tidak ada perubahan)';
@@ -378,7 +404,11 @@
 			// dan produknya akan terbaca untung penuh di laporan laba.
 			hargaBeli: hargaBeli === undefined ? null : hargaBeli,
 			qty: qtyNum,
-			barcode: barcodeVal
+			barcode: barcodeVal,
+			// '' = pilihan "Tanpa Kategori". Dibiarkan null, bukan dipaksa masuk
+			// kategori bawaan — produk yang belum dikelompokkan harus tetap kelihatan
+			// belum dikelompokkan di laporan.
+			kategoriId: kategoriId === '' ? null : Number(kategoriId)
 		};
 
 		// Kolom barcode UNIQUE di database, jadi duplikat akan ditolak SQLite dengan
@@ -439,6 +469,7 @@
 		harga = barang.harga;
 		hargaBeli = barang.hargaBeli ?? undefined;
 		qty = barang.qty ?? undefined;
+		kategoriId = barang.kategoriId === null ? '' : String(barang.kategoriId);
 		formError = '';
 		bukaPanelForm();
 	}
@@ -522,7 +553,12 @@
 			const hasil = await bacaProdukExcel();
 			if (!hasil) return; // dialog ditutup user
 
-			const r = await siapkanImportBarang(hasil.baris, hasil.error, hasil.adaKolomHargaBeli);
+			const r = await siapkanImportBarang(
+				hasil.baris,
+				hasil.error,
+				hasil.adaKolomHargaBeli,
+				hasil.adaKolomKategori
+			);
 			if (r.baru.length === 0 && r.ubah.length === 0 && r.error.length === 0) {
 				toast.info(
 					r.sama > 0
@@ -564,6 +600,9 @@
 					(hasil.gagal.length > 0 ? `, ${hasil.gagal.length} baris gagal` : '')
 			);
 			muatUlang();
+			// import bisa melahirkan kategori baru; tanpa ini pilihan di form masih
+			// daftar yang lama sampai halaman dibuka ulang
+			muatKategori();
 			// produk yang sedang dibuka di form bisa saja baru diubah file import —
 			// isinya jadi basi, dan Simpan Perubahan akan menimpanya balik
 			if (editId !== null) resetForm();
@@ -610,6 +649,7 @@
 		harga = undefined;
 		hargaBeli = undefined;
 		qty = undefined;
+		kategoriId = '';
 		formError = '';
 	}
 </script>
@@ -658,6 +698,7 @@
 				<thead>
 					<tr>
 						<th>Nama Produk</th>
+						<th>Kategori</th>
 						<th>Barcode</th>
 						<th class="num">Harga Beli</th>
 						<th class="num">Harga Jual</th>
@@ -668,10 +709,10 @@
 				</thead>
 				<tbody>
 					{#if loading}
-						<tr><td colspan="7" class="empty">Memuat data...</td></tr>
+						<tr><td colspan="8" class="empty">Memuat data...</td></tr>
 					{:else if barangList.length === 0}
 						<tr>
-							<td colspan="7" class="empty">
+							<td colspan="8" class="empty">
 								{cariAktif ? `Tidak ada produk cocok dengan "${cariAktif}"` : 'Belum ada produk'}
 							</td>
 						</tr>
@@ -679,6 +720,9 @@
 						{#each barangList as barang (barang.id)}
 							<tr>
 								<td class="nama-sel">{barang.nama}</td>
+								<td class="kategori-sel" class:kosong={barang.kategoriNama === null}>
+									{barang.kategoriNama ?? '—'}
+								</td>
 								<td class="mono">{barang.barcode ?? '—'}</td>
 								<td class="num" class:kosong={barang.hargaBeli === null}>
 									{barang.hargaBeli === null ? '—' : formatRupiah(barang.hargaBeli)}
@@ -786,6 +830,22 @@
 				placeholder="mis. Beras 5kg"
 				use:manualSaja={alihkanScan}
 			/>
+
+			<label for="kategori">
+				Kategori
+				<span class="opt">(opsional — untuk memisahkan pemasukan di Laporan)</span>
+			</label>
+			<select id="kategori" bind:value={kategoriId}>
+				<option value="">Tanpa Kategori</option>
+				{#each daftarKategori as k (k.id)}
+					<option value={String(k.id)}>{k.nama}</option>
+				{/each}
+			</select>
+			{#if daftarKategori.length === 0}
+				<p class="opt-hint">
+					Belum ada kategori. Buat dulu di Pengaturan → Produk → Kategori Produk.
+				</p>
+			{/if}
 
 			<label for="harga-beli">Harga Beli / Modal (Rp) <span class="opt">(opsional)</span></label>
 			<input
@@ -948,6 +1008,17 @@
 				Produk yang tidak ada di file dibiarkan apa adanya — import tidak menghapus produk.
 			</p>
 
+			<!-- Kategori baru disebut satu per satu sebelum dibuat: salah ketik satu
+			     huruf melahirkan kategori kembar yang memecah angka di Laporan, dan itu
+			     jauh lebih mudah dibatalkan sekarang daripada dirapikan nanti. -->
+			{#if rencana.kategoriBaru.length > 0}
+				<p class="import-note kategori-baru">
+					<strong>{rencana.kategoriBaru.length} kategori baru</strong> akan dibuat:
+					{rencana.kategoriBaru.join(', ')}. Periksa ejaannya — kategori yang salah ketik
+					jadi kelompok sendiri di Laporan.
+				</p>
+			{/if}
+
 			<div class="import-list">
 				{#each rencana.ubah as u (u.sebelum.id)}
 					<div class="import-row">
@@ -964,7 +1035,9 @@
 						<span class="import-isi">
 							<strong>{b.nama}</strong>
 							<span class="import-detail">
-								{formatRupiah(b.harga)} · stok {b.qty ?? '-'} · {b.barcode}
+								{formatRupiah(b.harga)} · stok {b.qty ?? '-'} · {b.barcode}{b.kategori
+									? ` · ${b.kategori}`
+									: ''}
 							</span>
 						</span>
 					</div>
@@ -1095,6 +1168,14 @@
 	}
 
 	.opt.terkunci {
+		color: var(--text-muted);
+	}
+
+	/* Petunjuk kecil di bawah kolom yang isinya belum bisa dipilih — bukan error,
+	   jadi jangan merah. */
+	.opt-hint {
+		margin: 0.3rem 0 0 0;
+		font-size: 0.78rem;
 		color: var(--text-muted);
 	}
 
@@ -1234,6 +1315,11 @@
 		font-weight: 500;
 	}
 
+	.kategori-sel {
+		color: var(--text-muted);
+		font-size: 0.88rem;
+	}
+
 	/* Angka rata kanan dengan lebar digit seragam supaya satuan ribuan berbaris
 	   lurus ke bawah — tanpa itu mata harus membaca tiap angka satu per satu
 	   untuk membandingkan harga. */
@@ -1364,6 +1450,17 @@
 		font-size: 0.78rem;
 		color: var(--text-muted);
 		margin: 0.9rem 0 0.6rem;
+	}
+
+	/* Kategori yang akan lahir dari file — perlu lebih menarik mata daripada
+	   catatan biasa, karena inilah yang paling sering salah ketik. */
+	.import-note.kategori-baru {
+		color: var(--text);
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 0.5rem 0.7rem;
+		margin-top: 0;
 	}
 
 	.import-list {

@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
-import type { KasBon, Penjualan, Ringkasan } from '$lib/types';
+import type { KasBon, Penjualan, PenjualanKategori, Ringkasan } from '$lib/types';
 import { formatTanggal, formatTanggalJam, formatTanggalLokal } from '$lib/utils/format';
 
 const HIJAU = 'FF2F6E4F';
@@ -95,6 +95,7 @@ const HEADER_PENJUALAN = [
 	'Waktu',
 	'Kasir',
 	'Barang',
+	'Kategori',
 	'Jumlah',
 	'Harga Beli',
 	'Harga Jual',
@@ -108,6 +109,7 @@ const LEBAR_PENJUALAN = [
 	{ width: 22 },
 	{ width: 14 },
 	{ width: 26 },
+	{ width: 16 },
 	{ width: 9 },
 	{ width: 14 },
 	{ width: 14 },
@@ -118,7 +120,14 @@ const LEBAR_PENJUALAN = [
 ];
 
 /** Kolom yang di-merge sepanjang satu transaksi: Waktu, Kasir, Total, Laba Transaksi. */
-const KOLOM_MERGE = [1, 2, 9, 10];
+const KOLOM_MERGE = [1, 2, 10, 11];
+
+/**
+ * Baris item yang kategorinya kosong. Ditulis begini, bukan dibiarkan sel kosong:
+ * sel kosong di Excel terbaca seperti data yang hilang, padahal artinya produknya
+ * memang belum dikelompokkan.
+ */
+const TANPA_KATEGORI = 'Tanpa Kategori';
 
 /**
  * Harga beli yang belum diisi ditulis "-", bukan 0 dan bukan kosong.
@@ -149,7 +158,10 @@ function tulisTabelPenjualan(
 
 	for (const p of penjualan) {
 		const baseRow = r;
-		const items = p.items.length > 0 ? p.items : [{ nama: '-', harga: 0, jumlah: 0, barangId: 0 }];
+		const items =
+			p.items.length > 0
+				? p.items
+				: [{ nama: '-', harga: 0, jumlah: 0, barangId: 0, kategori: null }];
 
 		// Laba transaksi hanya menjumlah item yang harga belinya tercatat. Kalau ada
 		// item yang belum, angkanya ditandai "±" supaya tidak dibaca sebagai laba penuh.
@@ -170,24 +182,28 @@ function tulisTabelPenjualan(
 			row.getCell(1).value = i === 0 ? formatTanggalJam(p.tanggal) : '';
 			row.getCell(2).value = i === 0 ? p.kasir : '';
 			row.getCell(3).value = item.nama;
-			row.getCell(4).value = item.jumlah || '';
 
-			row.getCell(5).value = hargaBeli === null ? TAK_DIKETAHUI : hargaBeli;
-			if (hargaBeli === null) row.getCell(5).font = { italic: true, color: { argb: 'FF767671' } };
-			else row.getCell(5).numFmt = RUPIAH_FMT;
+			row.getCell(4).value = item.kategori ?? TANPA_KATEGORI;
+			if (!item.kategori) row.getCell(4).font = { italic: true, color: { argb: 'FF767671' } };
 
-			row.getCell(6).value = item.harga || '';
-			row.getCell(6).numFmt = RUPIAH_FMT;
-			row.getCell(7).value = subtotal || '';
+			row.getCell(5).value = item.jumlah || '';
+
+			row.getCell(6).value = hargaBeli === null ? TAK_DIKETAHUI : hargaBeli;
+			if (hargaBeli === null) row.getCell(6).font = { italic: true, color: { argb: 'FF767671' } };
+			else row.getCell(6).numFmt = RUPIAH_FMT;
+
+			row.getCell(7).value = item.harga || '';
 			row.getCell(7).numFmt = RUPIAH_FMT;
+			row.getCell(8).value = subtotal || '';
+			row.getCell(8).numFmt = RUPIAH_FMT;
 
-			row.getCell(8).value = laba === null ? TAK_DIKETAHUI : laba;
-			if (laba === null) row.getCell(8).font = { italic: true, color: { argb: 'FF767671' } };
-			else row.getCell(8).numFmt = RUPIAH_FMT;
+			row.getCell(9).value = laba === null ? TAK_DIKETAHUI : laba;
+			if (laba === null) row.getCell(9).font = { italic: true, color: { argb: 'FF767671' } };
+			else row.getCell(9).numFmt = RUPIAH_FMT;
 
-			row.getCell(9).value = i === 0 ? p.total : '';
-			row.getCell(9).numFmt = RUPIAH_FMT;
-			row.getCell(9).font = { bold: true };
+			row.getCell(10).value = i === 0 ? p.total : '';
+			row.getCell(10).numFmt = RUPIAH_FMT;
+			row.getCell(10).font = { bold: true };
 			styleBarisData(ws, r, header.length, zebra);
 			r++;
 		});
@@ -195,7 +211,7 @@ function tulisTabelPenjualan(
 		// Tetap angka, bukan teks "± Rp3.000": kolom ini harus bisa di-SUM di Excel.
 		// Ketidaklengkapannya ditandai lewat gaya huruf — miring & abu berarti masih
 		// ada item di transaksi ini yang harga belinya belum diisi.
-		const selLaba = ws.getCell(baseRow, 10);
+		const selLaba = ws.getCell(baseRow, 11);
 		selLaba.value = labaTransaksi;
 		selLaba.numFmt = RUPIAH_FMT;
 		selLaba.font = adaYangBelum
@@ -328,6 +344,129 @@ function buatSheetHariIni(
 	tulisTabelPenjualan(ws, data.penjualan, rHeader, false);
 }
 
+/**
+ * Sheet ringkasan per kategori — inti permintaan client: pemasukan tiap kelompok
+ * barang harus bisa dibaca sendiri, bukan tercampur di satu total.
+ *
+ * Angkanya dihitung dari `penjualan` yang sama dengan sheet lain, bukan dari query
+ * terpisah, supaya total di sheet ini selalu sama dengan total di sheet Penjualan.
+ * Dua angka berbeda di satu file adalah cara tercepat membuat laporan tidak
+ * dipercaya lagi.
+ */
+function buatSheetKategori(wb: ExcelJS.Workbook, penjualan: Penjualan[], periode?: string) {
+	const ws = wb.addWorksheet('Kategori');
+	const header = ['Kategori', 'Terjual (qty)', 'Pemasukan', 'Modal', 'Laba', 'Belum Dihitung'];
+	ws.columns = [
+		{ width: 24 },
+		{ width: 14 },
+		{ width: 16 },
+		{ width: 16 },
+		{ width: 16 },
+		{ width: 18 }
+	];
+
+	judulSheet(ws, 'Pemasukan per Kategori', header.length, periode);
+
+	const rHeader = 4;
+	header.forEach((h, i) => (ws.getCell(rHeader, i + 1).value = h));
+	styleHeaderBaris(ws, rHeader, header.length);
+
+	const baris = ringkasKategori(penjualan);
+
+	let r = rHeader + 1;
+	if (baris.length === 0) {
+		ws.mergeCells(r, 1, r, header.length);
+		ws.getCell(r, 1).value = 'Belum ada penjualan';
+		ws.getCell(r, 1).alignment = { horizontal: 'center' };
+		ws.getCell(r, 1).font = { italic: true, color: { argb: 'FF767671' } };
+		return;
+	}
+
+	baris.forEach((k, i) => {
+		const row = ws.getRow(r);
+		row.getCell(1).value = k.kategori ?? TANPA_KATEGORI;
+		if (k.kategori === null) row.getCell(1).font = { italic: true, color: { argb: 'FF767671' } };
+		row.getCell(2).value = k.totalQty;
+		row.getCell(3).value = k.totalNilai;
+		row.getCell(3).numFmt = RUPIAH_FMT;
+		row.getCell(4).value = k.totalModal;
+		row.getCell(4).numFmt = RUPIAH_FMT;
+
+		// null = tidak satu pun baris kategori ini punya harga beli. Ditulis "-",
+		// bukan 0: 0 akan terbaca "terjual tapi tidak untung sama sekali".
+		row.getCell(5).value = k.totalLaba === null ? TAK_DIKETAHUI : k.totalLaba;
+		if (k.totalLaba === null) row.getCell(5).font = { italic: true, color: { argb: 'FF767671' } };
+		else row.getCell(5).numFmt = RUPIAH_FMT;
+
+		row.getCell(6).value = k.nilaiBelumTerhitung || '';
+		row.getCell(6).numFmt = RUPIAH_FMT;
+
+		styleBarisData(ws, r, header.length, i % 2 === 1);
+		r++;
+	});
+
+	// Baris total, supaya file bisa langsung dicocokkan dengan sheet Dashboard.
+	const rTotal = r;
+	const totalRow = ws.getRow(rTotal);
+	totalRow.getCell(1).value = 'Total';
+	totalRow.getCell(2).value = baris.reduce((s, k) => s + k.totalQty, 0);
+	totalRow.getCell(3).value = baris.reduce((s, k) => s + k.totalNilai, 0);
+	totalRow.getCell(4).value = baris.reduce((s, k) => s + k.totalModal, 0);
+	totalRow.getCell(5).value = baris.reduce((s, k) => s + (k.totalLaba ?? 0), 0);
+	totalRow.getCell(6).value = baris.reduce((s, k) => s + k.nilaiBelumTerhitung, 0) || '';
+	for (let c = 1; c <= header.length; c++) {
+		totalRow.getCell(c).font = { bold: true };
+		totalRow.getCell(c).border = BORDER_TIPIS;
+		if (c >= 3) totalRow.getCell(c).numFmt = RUPIAH_FMT;
+	}
+
+	ws.autoFilter = { from: { row: rHeader, column: 1 }, to: { row: rHeader, column: header.length } };
+	ws.views = [{ state: 'frozen', ySplit: rHeader }];
+}
+
+/**
+ * Mengelompokkan baris transaksi per kategori yang TERSIMPAN di baris itu, bukan
+ * per kategori produknya sekarang — sama seperti query di halaman Laporan, supaya
+ * angka di layar dan di Excel tidak pernah berbeda.
+ */
+function ringkasKategori(penjualan: Penjualan[]): PenjualanKategori[] {
+	const peta = new Map<string, PenjualanKategori>();
+
+	for (const p of penjualan) {
+		for (const i of p.items) {
+			const kategori = i.kategori ?? null;
+			// Kunci peta dibedakan dari nama kategori: kategori bernama "null" (kalau
+			// pernah diketik orang lewat import) tidak boleh menyatu dengan baris
+			// "tanpa kategori" yang sungguhan.
+			const kunci = kategori === null ? '\u0000tanpa' : kategori;
+			let baris = peta.get(kunci);
+			if (!baris) {
+				baris = {
+					kategori,
+					totalQty: 0,
+					totalNilai: 0,
+					totalLaba: null,
+					totalModal: 0,
+					nilaiBelumTerhitung: 0
+				};
+				peta.set(kunci, baris);
+			}
+
+			baris.totalQty += i.jumlah;
+			baris.totalNilai += i.harga * i.jumlah;
+
+			if (i.hargaBeli === null || i.hargaBeli === undefined) {
+				baris.nilaiBelumTerhitung += i.harga * i.jumlah;
+			} else {
+				baris.totalModal += i.hargaBeli * i.jumlah;
+				baris.totalLaba = (baris.totalLaba ?? 0) + (i.harga - i.hargaBeli) * i.jumlah;
+			}
+		}
+	}
+
+	return [...peta.values()].sort((a, b) => b.totalNilai - a.totalNilai);
+}
+
 function buatSheetBon(wb: ExcelJS.Workbook, kasbon: KasBon[], periode?: string) {
 	const ws = wb.addWorksheet('Bon');
 	const header = [
@@ -445,6 +584,7 @@ export async function exportLaporanExcel(
 	buatSheetDashboard(wb, penjualan, kasbon, opts?.periode);
 	if (opts?.hariIni) buatSheetHariIni(wb, opts.hariIni);
 	buatSheetPenjualan(wb, penjualan, opts?.periode);
+	buatSheetKategori(wb, penjualan, opts?.periode);
 	buatSheetBon(wb, kasbon, opts?.periode);
 
 	const path = await save({

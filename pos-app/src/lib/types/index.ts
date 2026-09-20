@@ -18,6 +18,17 @@ export type Barang = {
 	hargaBeli: number | null;
 	qty: number | null;
 	barcode: string | null;
+	/** `null` = belum dikategorikan. Di laporan muncul sebagai "Tanpa Kategori". */
+	kategoriId: number | null;
+	/** Nama kategori, ikut dibaca lewat JOIN supaya daftar produk tidak perlu query kedua. */
+	kategoriNama: string | null;
+};
+
+export type Kategori = {
+	id: number;
+	nama: string;
+	/** Banyaknya produk yang memakai kategori ini — untuk peringatan sebelum dihapus. */
+	jumlahProduk: number;
 };
 
 export type ItemPenjualan = {
@@ -26,6 +37,12 @@ export type ItemPenjualan = {
 	harga: number;
 	/** Harga beli saat transaksi terjadi — disalin, bukan dibaca ulang dari produk. */
 	hargaBeli?: number | null;
+	/**
+	 * Nama kategori saat transaksi terjadi — disalin dengan alasan yang sama seperti
+	 * harga beli: memindahkan produk ke kategori lain hari ini tidak boleh mengubah
+	 * laporan bulan lalu. `null` = produknya belum berkategori waktu itu.
+	 */
+	kategori?: string | null;
 	jumlah: number;
 };
 
@@ -90,6 +107,20 @@ export type Ringkasan = {
 	omzetBelumTerhitung: number;
 	/** Banyaknya baris transaksi yang harga belinya kosong. */
 	barisBelumTerhitung: number;
+};
+
+/** Satu baris laporan penjualan per kategori. */
+export type PenjualanKategori = {
+	/** `null` = baris transaksi yang produknya belum berkategori saat terjual. */
+	kategori: string | null;
+	totalQty: number;
+	totalNilai: number;
+	/** `null` = tidak ada baris kategori ini yang punya harga beli, jadi labanya tak diketahui. */
+	totalLaba: number | null;
+	/** Nilai penjualan yang harga belinya kosong — modal & labanya belum bisa dihitung. */
+	nilaiBelumTerhitung: number;
+	/** Modal (harga beli x jumlah) dari baris yang harga belinya tercatat. */
+	totalModal: number;
 };
 
 export type BarangTerjual = {

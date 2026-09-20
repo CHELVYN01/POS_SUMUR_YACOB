@@ -95,11 +95,15 @@ export async function simpanKasBon(input: {
 	const kasbonId = result.lastInsertId as number;
 
 	for (const item of input.items) {
-		// Harga beli ikut disalin walau laporan laba belum menampilkan kas bon —
-		// nilainya tidak bisa dihitung mundur kalau baru mulai dicatat nanti.
+		// Harga beli & kategori ikut disalin walau laporan belum menampilkan kas bon
+		// per kategori — nilainya tidak bisa dihitung mundur kalau baru mulai dicatat
+		// nanti, dan kategori produknya bisa sudah berpindah waktu itu.
 		await db.execute(
-			`INSERT INTO item_kasbon (kasbon_id, barang_id, nama, harga, jumlah, harga_beli)
-			 VALUES ($1, $2, $3, $4, $5, (SELECT harga_beli FROM barang WHERE id = $2))`,
+			`INSERT INTO item_kasbon (kasbon_id, barang_id, nama, harga, jumlah, harga_beli, kategori)
+			 VALUES ($1, $2, $3, $4, $5,
+			         (SELECT harga_beli FROM barang WHERE id = $2),
+			         (SELECT k.nama FROM barang b LEFT JOIN kategori k ON k.id = b.kategori_id
+			          WHERE b.id = $2))`,
 			[kasbonId, item.barangId, item.nama, item.harga, item.jumlah]
 		);
 	}

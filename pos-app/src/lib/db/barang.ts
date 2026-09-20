@@ -1,4 +1,5 @@
 import { getDb } from './index';
+import { listKategori, pastikanKategori } from './kategori';
 import type { Barang } from '$lib/types';
 import type { BarisProduk, ErrorBaris } from '$lib/export/produk';
 import { formatRupiah } from '$lib/utils/format';
@@ -10,6 +11,8 @@ type BarangRow = {
 	harga_beli: number | null;
 	qty: number | null;
 	barcode: string | null;
+	kategori_id: number | null;
+	kategori_nama: string | null;
 };
 
 function toBarang(row: BarangRow): Barang {
@@ -19,13 +22,28 @@ function toBarang(row: BarangRow): Barang {
 		harga: row.harga,
 		hargaBeli: row.harga_beli,
 		qty: row.qty,
-		barcode: row.barcode
+		barcode: row.barcode,
+		kategoriId: row.kategori_id,
+		kategoriNama: row.kategori_nama
 	};
 }
 
+/**
+ * Kolom produk + nama kategorinya. LEFT JOIN, bukan JOIN: produk tanpa kategori
+ * (yaitu semua produk lama sesaat setelah upgrade) harus tetap ikut terbaca.
+ *
+ * Alias `b` dipakai di semua pemanggil supaya klausa WHERE-nya tidak ambigu
+ * begitu tabel kedua ikut masuk.
+ */
+const KOLOM_BARANG = `b.id, b.nama, b.harga, b.harga_beli, b.qty, b.barcode,
+	 b.kategori_id, k.nama AS kategori_nama`;
+const DARI_BARANG = 'FROM barang b LEFT JOIN kategori k ON k.id = b.kategori_id';
+
 export async function listBarang(): Promise<Barang[]> {
 	const db = await getDb();
-	const rows = await db.select<BarangRow[]>('SELECT id, nama, harga, harga_beli, qty, barcode FROM barang ORDER BY nama');
+	const rows = await db.select<BarangRow[]>(
+		`SELECT ${KOLOM_BARANG} ${DARI_BARANG} ORDER BY b.nama`
+	);
 	return rows.map(toBarang);
 }
 
@@ -37,17 +55,18 @@ function polaLike(kata: string): string {
 	return '%' + kata.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
 }
 
-const SELECT_BARANG = 'SELECT id, nama, harga, harga_beli, qty, barcode FROM barang';
-const FILTER_CARI = "(nama LIKE $1 ESCAPE '\\' OR barcode LIKE $1 ESCAPE '\\')";
+const SELECT_BARANG = `SELECT ${KOLOM_BARANG} ${DARI_BARANG}`;
+const FILTER_CARI = "(b.nama LIKE $1 ESCAPE '\\' OR b.barcode LIKE $1 ESCAPE '\\')";
 
 /** Jumlah produk yang cocok — dipakai untuk menghitung banyaknya halaman. */
 export async function hitungBarang(cari = ''): Promise<number> {
 	const db = await getDb();
 	const kata = cari.trim();
 	const rows = kata
-		? await db.select<{ n: number }[]>(`SELECT COUNT(*) AS n FROM barang WHERE ${FILTER_CARI}`, [
-				polaLike(kata)
-			])
+		? await db.select<{ n: number }[]>(
+				`SELECT COUNT(*) AS n FROM barang b WHERE ${FILTER_CARI}`,
+				[polaLike(kata)]
+			)
 		: await db.select<{ n: number }[]>('SELECT COUNT(*) AS n FROM barang');
 	return rows[0]?.n ?? 0;
 }
@@ -66,10 +85,10 @@ export async function listBarangHalaman(
 	const kata = cari.trim();
 	const rows = kata
 		? await db.select<BarangRow[]>(
-				`${SELECT_BARANG} WHERE ${FILTER_CARI} ORDER BY nama LIMIT $2 OFFSET $3`,
+				`${SELECT_BARANG} WHERE ${FILTER_CARI} ORDER BY b.nama LIMIT $2 OFFSET $3`,
 				[polaLike(kata), limit, offset]
 			)
-		: await db.select<BarangRow[]>(`${SELECT_BARANG} ORDER BY nama LIMIT $1 OFFSET $2`, [
+		: await db.select<BarangRow[]>(`${SELECT_BARANG} ORDER BY b.nama LIMIT $1 OFFSET $2`, [
 				limit,
 				offset
 			]);
@@ -86,8 +105,8 @@ export async function listBarangHalaman(
 export async function listBarangTerlaris(limit = 30): Promise<Barang[]> {
 	const db = await getDb();
 	const rows = await db.select<BarangRow[]>(
-		`SELECT b.id, b.nama, b.harga, b.harga_beli, b.qty, b.barcode
-		 FROM barang b
+		`SELECT ${KOLOM_BARANG}
+		 ${DARI_BARANG}
 		 LEFT JOIN item_penjualan ip ON ip.barang_id = b.id
 		 GROUP BY b.id
 		 ORDER BY COALESCE(SUM(ip.jumlah), 0) DESC, b.nama
@@ -103,7 +122,7 @@ export async function cariBarang(cari: string, limit = 50): Promise<Barang[]> {
 	const kata = cari.trim();
 	if (!kata) return [];
 	const rows = await db.select<BarangRow[]>(
-		`${SELECT_BARANG} WHERE ${FILTER_CARI} ORDER BY nama LIMIT $2`,
+		`${SELECT_BARANG} WHERE ${FILTER_CARI} ORDER BY b.nama LIMIT $2`,
 		[polaLike(kata), limit]
 	);
 	return rows.map(toBarang);
@@ -157,7 +176,7 @@ export async function hitungBarangTanpaStok(): Promise<number> {
 export async function cariBarangByBarcode(barcode: string): Promise<Barang | null> {
 	const db = await getDb();
 	const rows = await db.select<BarangRow[]>(
-		'SELECT id, nama, harga, harga_beli, qty, barcode FROM barang WHERE barcode = $1',
+		`${SELECT_BARANG} WHERE b.barcode = $1`,
 		[barcode]
 	);
 	return rows[0] ? toBarang(rows[0]) : null;
@@ -169,13 +188,16 @@ export type InputBarang = {
 	hargaBeli: number | null;
 	qty: number | null;
 	barcode: string | null;
+	/** `null` = tanpa kategori. Bukan kesalahan — produk boleh belum dikelompokkan. */
+	kategoriId: number | null;
 };
 
 export async function tambahBarang(input: InputBarang): Promise<number> {
 	const db = await getDb();
 	const result = await db.execute(
-		'INSERT INTO barang (nama, harga, harga_beli, qty, barcode) VALUES ($1, $2, $3, $4, $5)',
-		[input.nama, input.harga, input.hargaBeli, input.qty, input.barcode]
+		`INSERT INTO barang (nama, harga, harga_beli, qty, barcode, kategori_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		[input.nama, input.harga, input.hargaBeli, input.qty, input.barcode, input.kategoriId]
 	);
 	return result.lastInsertId as number;
 }
@@ -183,8 +205,10 @@ export async function tambahBarang(input: InputBarang): Promise<number> {
 export async function updateBarang(id: number, input: InputBarang): Promise<void> {
 	const db = await getDb();
 	await db.execute(
-		'UPDATE barang SET nama = $1, harga = $2, harga_beli = $3, qty = $4, barcode = $5 WHERE id = $6',
-		[input.nama, input.harga, input.hargaBeli, input.qty, input.barcode, id]
+		`UPDATE barang SET nama = $1, harga = $2, harga_beli = $3, qty = $4, barcode = $5,
+		        kategori_id = $6
+		 WHERE id = $7`,
+		[input.nama, input.harga, input.hargaBeli, input.qty, input.barcode, input.kategoriId, id]
 	);
 }
 
@@ -229,9 +253,18 @@ export type RencanaImport = {
 	error: ErrorBaris[];
 	/** false = file tanpa kolom Harga Beli; harga beli yang sudah ada tidak disentuh */
 	adaKolomHargaBeli: boolean;
+	/** false = file tanpa kolom Kategori; kategori yang sudah ada tidak disentuh */
+	adaKolomKategori: boolean;
+	/** Nama kategori di file yang belum terdaftar — akan dibuat saat import dijalankan. */
+	kategoriBaru: string[];
 };
 
-function bedaProduk(sebelum: Barang, baris: BarisProduk, adaKolomHargaBeli: boolean): string[] {
+function bedaProduk(
+	sebelum: Barang,
+	baris: BarisProduk,
+	adaKolomHargaBeli: boolean,
+	adaKolomKategori: boolean
+): string[] {
 	const perubahan: string[] = [];
 	if (sebelum.nama !== baris.nama) perubahan.push(`nama: "${sebelum.nama}" → "${baris.nama}"`);
 	if (sebelum.harga !== baris.harga) {
@@ -248,6 +281,11 @@ function bedaProduk(sebelum: Barang, baris: BarisProduk, adaKolomHargaBeli: bool
 	}
 	if ((sebelum.barcode ?? '') !== baris.barcode) {
 		perubahan.push(`barcode: ${sebelum.barcode ?? '-'} → ${baris.barcode}`);
+	}
+	// Sama seperti Harga Beli: kolom yang tidak ada di file berarti tidak ada yang
+	// diminta berubah, bukan "kategorinya dikosongkan".
+	if (adaKolomKategori && (sebelum.kategoriNama ?? '') !== (baris.kategori ?? '')) {
+		perubahan.push(`kategori: ${sebelum.kategoriNama ?? '-'} → ${baris.kategori ?? '-'}`);
 	}
 	return perubahan;
 }
@@ -267,18 +305,33 @@ function bedaProduk(sebelum: Barang, baris: BarisProduk, adaKolomHargaBeli: bool
 export async function siapkanImportBarang(
 	baris: BarisProduk[],
 	errorParse: ErrorBaris[] = [],
-	adaKolomHargaBeli = true
+	adaKolomHargaBeli = true,
+	adaKolomKategori = true
 ): Promise<RencanaImport> {
 	const semua = await listBarang();
 	const byId = new Map(semua.map((b) => [b.id, b]));
 	const byBarcode = new Map(semua.filter((b) => b.barcode).map((b) => [b.barcode as string, b]));
+
+	// Kategori yang diketik di file tapi belum terdaftar disebut di pratinjau, supaya
+	// user melihat dulu daftar kategori yang akan lahir — salah ketik satu huruf
+	// bikin kategori kembar yang memecah angka laporannya.
+	const kategoriAda = new Set((await listKategori()).map((k) => k.nama.toLowerCase()));
+	const kategoriBaru = new Set<string>();
+	if (adaKolomKategori) {
+		for (const b of baris) {
+			const nama = b.kategori?.trim();
+			if (nama && !kategoriAda.has(nama.toLowerCase())) kategoriBaru.add(nama);
+		}
+	}
 
 	const rencana: RencanaImport = {
 		baru: [],
 		ubah: [],
 		sama: 0,
 		error: [...errorParse],
-		adaKolomHargaBeli
+		adaKolomHargaBeli,
+		adaKolomKategori,
+		kategoriBaru: [...kategoriBaru].sort()
 	};
 
 	for (const b of baris) {
@@ -301,7 +354,7 @@ export async function siapkanImportBarang(
 			continue;
 		}
 
-		const perubahan = bedaProduk(target, b, adaKolomHargaBeli);
+		const perubahan = bedaProduk(target, b, adaKolomHargaBeli, adaKolomKategori);
 		if (perubahan.length === 0) rencana.sama += 1;
 		else rencana.ubah.push({ baris: b, sebelum: target, perubahan });
 	}
@@ -323,6 +376,37 @@ export type HasilImport = { baru: number; ubah: number; gagal: ErrorBaris[] };
 export async function terapkanImportBarang(rencana: RencanaImport): Promise<HasilImport> {
 	const hasil: HasilImport = { baru: 0, ubah: 0, gagal: [] };
 
+	// Kategori dibuat sekali di depan lalu dipetakan, bukan dicari ulang tiap baris:
+	// file berisi ratusan baris hanya punya segelintir kategori, dan `pastikanKategori`
+	// per baris berarti ratusan query yang sama berulang-ulang.
+	const idKategori = new Map<string, number | null>();
+	if (rencana.adaKolomKategori) {
+		const namaDipakai = new Set<string>();
+		for (const b of [...rencana.baru, ...rencana.ubah.map((u) => u.baris)]) {
+			const nama = b.kategori?.trim();
+			if (nama) namaDipakai.add(nama);
+		}
+		for (const nama of namaDipakai) {
+			try {
+				idKategori.set(nama.toLowerCase(), await pastikanKategori(nama));
+			} catch (e) {
+				console.error('Gagal menyiapkan kategori saat import:', e);
+				idKategori.set(nama.toLowerCase(), null);
+			}
+		}
+	}
+
+	/**
+	 * Kategori untuk satu baris. File tanpa kolom Kategori tidak boleh menghapus
+	 * pengelompokan yang sudah dirapikan lewat aplikasi, jadi nilai lama dipakai.
+	 */
+	function kategoriUntuk(baris: BarisProduk, lama: number | null): number | null {
+		if (!rencana.adaKolomKategori) return lama;
+		const nama = baris.kategori?.trim();
+		if (!nama) return null;
+		return idKategori.get(nama.toLowerCase()) ?? lama;
+	}
+
 	for (const u of rencana.ubah) {
 		try {
 			await updateBarang(u.sebelum.id, {
@@ -331,7 +415,8 @@ export async function terapkanImportBarang(rencana: RencanaImport): Promise<Hasi
 				// File tanpa kolom Harga Beli tidak boleh menghapus yang sudah tersimpan.
 				hargaBeli: rencana.adaKolomHargaBeli ? u.baris.hargaBeli : u.sebelum.hargaBeli,
 				qty: u.baris.qty,
-				barcode: u.baris.barcode
+				barcode: u.baris.barcode,
+				kategoriId: kategoriUntuk(u.baris, u.sebelum.kategoriId)
 			});
 			hasil.ubah += 1;
 		} catch (e) {
@@ -347,7 +432,8 @@ export async function terapkanImportBarang(rencana: RencanaImport): Promise<Hasi
 				harga: b.harga,
 				hargaBeli: b.hargaBeli,
 				qty: b.qty,
-				barcode: b.barcode
+				barcode: b.barcode,
+				kategoriId: kategoriUntuk(b, null)
 			});
 			hasil.baru += 1;
 		} catch (e) {

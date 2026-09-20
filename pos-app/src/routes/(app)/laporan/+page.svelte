@@ -6,11 +6,13 @@
 		penjualanPerHari,
 		bonPerHari,
 		penjualanPerJam,
-		barangTerlaris
+		barangTerlaris,
+		penjualanPerKategori
 	} from '$lib/db/laporan';
 	import { exportLaporanExcel } from '$lib/export/excel';
 	import BarChart from '$lib/components/BarChart.svelte';
 	import BarList from '$lib/components/BarList.svelte';
+	import TabelKategori from '$lib/components/TabelKategori.svelte';
 	import DatePicker from '$lib/components/DatePicker.svelte';
 	import { formatRupiah, formatTanggal, formatTanggalJam, formatTanggalLokal } from '$lib/utils/format';
 	import {
@@ -27,7 +29,14 @@
 	} from '$lib/utils/periode';
 	import { currentUser } from '$lib/stores/session';
 	import { laporanKasirHariIni } from '$lib/stores/pengaturanLaporan';
-	import type { BarangTerjual, KasBon, Penjualan, Ringkasan, TitikGrafik } from '$lib/types';
+	import type {
+		BarangTerjual,
+		KasBon,
+		Penjualan,
+		PenjualanKategori,
+		Ringkasan,
+		TitikGrafik
+	} from '$lib/types';
 
 	type Tab = 'dashboard' | 'hariIni' | 'keseluruhan' | 'bon';
 	let tab = $state<Tab>('dashboard');
@@ -79,6 +88,7 @@
 	let grafikPenjualan7 = $state<TitikGrafik[]>([]);
 	let grafikBon7 = $state<TitikGrafik[]>([]);
 	let terlaris = $state<BarangTerjual[]>([]);
+	let kategoriBulan = $state<PenjualanKategori[]>([]);
 	let memuatDashboard = $state(true);
 
 	// --- Hari Ini ---
@@ -86,6 +96,7 @@
 	let ringkasanHari = $state<Ringkasan>(RINGKASAN_KOSONG);
 	let grafikJam = $state<TitikGrafik[]>([]);
 	let penjualanHari = $state<Penjualan[]>([]);
+	let kategoriHari = $state<PenjualanKategori[]>([]);
 	let memuatHari = $state(true);
 
 	// --- Keseluruhan ---
@@ -95,6 +106,7 @@
 	let ringkasanPeriodeAktif = $state<Ringkasan>(RINGKASAN_KOSONG);
 	let grafikPeriode = $state<TitikGrafik[]>([]);
 	let penjualanPeriode = $state<Penjualan[]>([]);
+	let kategoriPeriode = $state<PenjualanKategori[]>([]);
 	let memuatPeriode = $state(true);
 
 	// --- Kas Bon ---
@@ -135,14 +147,18 @@
 				ringkasanSemua,
 				grafikPenjualan7,
 				grafikBon7,
-				terlaris
+				terlaris,
+				kategoriBulan
 			] = await Promise.all([
 				ringkasanPeriode(hariIni()),
 				ringkasanPeriode(bulanIni()),
 				ringkasanPeriode(sepanjangWaktu()),
 				penjualanPerHari(p7),
 				bonPerHari(p7),
-				barangTerlaris(p30, 8)
+				barangTerlaris(p30, 8),
+				// Sengaja bulan berjalan, menyamai kartu "Laba Bulan Ini" di atasnya —
+				// pemisahan uang per kategori dibaca per bulan, bukan per hari.
+				penjualanPerKategori(bulanIni())
 			]);
 		} catch (e) {
 			pesanError = pesan(e);
@@ -156,10 +172,11 @@
 		try {
 			const p = hariIni();
 			tanggalAktif = p.dari;
-			[ringkasanHari, grafikJam, penjualanHari] = await Promise.all([
+			[ringkasanHari, grafikJam, penjualanHari, kategoriHari] = await Promise.all([
 				ringkasanPeriode(p),
 				penjualanPerJam(p),
-				listPenjualan(p)
+				listPenjualan(p),
+				penjualanPerKategori(p)
 			]);
 		} catch (e) {
 			pesanError = pesan(e);
@@ -171,9 +188,14 @@
 	async function muatKeseluruhan(p: Periode, pakaiGrafik: boolean) {
 		memuatPeriode = true;
 		try {
-			const [r, daftar] = await Promise.all([ringkasanPeriode(p), listPenjualan(p)]);
+			const [r, daftar, kat] = await Promise.all([
+				ringkasanPeriode(p),
+				listPenjualan(p),
+				penjualanPerKategori(p)
+			]);
 			ringkasanPeriodeAktif = r;
 			penjualanPeriode = daftar;
+			kategoriPeriode = kat;
 			grafikPeriode = pakaiGrafik ? await penjualanPerHari(p) : [];
 		} catch (e) {
 			pesanError = pesan(e);
@@ -445,6 +467,11 @@
 				<BarChart data={grafikPenjualan7} formatNilai={formatRupiah} />
 			</div>
 
+			<div class="card panel">
+				<h3 class="section-title">Pemasukan per Kategori (Bulan Ini)</h3>
+				<TabelKategori data={kategoriBulan} tampilkanLaba={adminAktif} />
+			</div>
+
 			<div class="panel-grid">
 				<div class="card panel">
 					<h3 class="section-title">Kas Bon 7 Hari Terakhir</h3>
@@ -504,6 +531,11 @@
 			<BarChart data={grafikJam} formatNilai={formatRupiah} />
 		</div>
 
+		<div class="card panel">
+			<h3 class="section-title">Pemasukan per Kategori</h3>
+			<TabelKategori data={kategoriHari} tampilkanLaba={adminAktif} memuat={memuatHari} />
+		</div>
+
 		<h3 class="section-title">Transaksi Hari Ini</h3>
 		{@render tabelPenjualan(penjualanHari, memuatHari)}
 	{/if}
@@ -561,6 +593,15 @@
 				<BarChart data={grafikPeriode} formatNilai={formatRupiah} />
 			</div>
 		{/if}
+
+		<div class="card panel">
+			<h3 class="section-title">Pemasukan per Kategori · {labelPeriodeAktif}</h3>
+			<TabelKategori
+				data={kategoriPeriode}
+				tampilkanLaba={adminAktif}
+				memuat={memuatPeriode}
+			/>
+		</div>
 
 		<h3 class="section-title">Daftar Transaksi</h3>
 		{@render tabelPenjualan(penjualanPeriode, memuatPeriode)}

@@ -15,6 +15,7 @@ type ItemRow = {
 	nama: string;
 	harga: number;
 	harga_beli: number | null;
+	kategori: string | null;
 	jumlah: number;
 };
 
@@ -38,7 +39,7 @@ export async function listPenjualan(periode?: Periode): Promise<Penjualan[]> {
 	if (penjualanRows.length === 0) return [];
 
 	const itemRows = await db.select<ItemRow[]>(
-		`SELECT penjualan_id, barang_id, nama, harga, harga_beli, jumlah FROM item_penjualan
+		`SELECT penjualan_id, barang_id, nama, harga, harga_beli, kategori, jumlah FROM item_penjualan
 		 WHERE penjualan_id IN (${penjualanRows.map((p) => p.id).join(',')})`
 	);
 
@@ -55,6 +56,7 @@ export async function listPenjualan(periode?: Periode): Promise<Penjualan[]> {
 					nama: i.nama,
 					harga: i.harga,
 					hargaBeli: i.harga_beli,
+					kategori: i.kategori,
 					jumlah: i.jumlah
 				})
 			)
@@ -82,9 +84,17 @@ export async function simpanPenjualan(kasirId: number, items: ItemPenjualan[]): 
 		//
 		// NULL kalau produknya belum punya harga beli — sengaja tidak dijadikan 0,
 		// karena 0 berarti "untung penuh" dan itu kebohongan yang mahal.
+		//
+		// Nama kategori disalin dengan alasan yang sama: kalau di-JOIN saat laporan
+		// dibuka, memindahkan sebuah produk ke kategori lain akan memindahkan pula
+		// seluruh penjualan lamanya — dan pemisahan uang antar kategori, yang jadi
+		// alasan fitur ini ada, langsung meleset ke belakang.
 		await db.execute(
-			`INSERT INTO item_penjualan (penjualan_id, barang_id, nama, harga, jumlah, harga_beli)
-			 VALUES ($1, $2, $3, $4, $5, (SELECT harga_beli FROM barang WHERE id = $2))`,
+			`INSERT INTO item_penjualan (penjualan_id, barang_id, nama, harga, jumlah, harga_beli, kategori)
+			 VALUES ($1, $2, $3, $4, $5,
+			         (SELECT harga_beli FROM barang WHERE id = $2),
+			         (SELECT k.nama FROM barang b LEFT JOIN kategori k ON k.id = b.kategori_id
+			          WHERE b.id = $2))`,
 			[penjualanId, item.barangId, item.nama, item.harga, item.jumlah]
 		);
 	}

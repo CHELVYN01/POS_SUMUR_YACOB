@@ -48,6 +48,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0007_hak_akses_laporan.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 8,
+            description: "kategori",
+            sql: include_str!("../migrations/0008_kategori.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

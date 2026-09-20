@@ -1,5 +1,5 @@
 import { getDb } from './index';
-import type { BarangTerjual, Ringkasan, TitikGrafik } from '$lib/types';
+import type { BarangTerjual, PenjualanKategori, Ringkasan, TitikGrafik } from '$lib/types';
 import type { Periode } from '$lib/utils/periode';
 
 /**
@@ -234,6 +234,60 @@ export async function barangTerlaris(p: Periode, limit = 10): Promise<BarangTerj
 		totalQty: r.total_qty,
 		totalNilai: r.total_nilai,
 		totalLaba: r.total_laba
+	}));
+}
+
+type KategoriRow = {
+	kategori: string | null;
+	total_qty: number;
+	total_nilai: number;
+	total_laba: number | null;
+	total_modal: number;
+	nilai_belum: number;
+};
+
+/**
+ * Penjualan dipecah per kategori — inti dari permintaan client: ada produk yang
+ * uang pembelian & penjualannya dipisah dari barang dagangan biasa, dan angkanya
+ * harus bisa dibaca sendiri-sendiri.
+ *
+ * Dikelompokkan per kolom `i.kategori` yang DISALIN ke baris transaksi, bukan
+ * lewat JOIN ke barang: produk yang dipindah kategorinya hari ini tidak boleh
+ * menarik penjualan bulan lalu ikut pindah, dan produk yang sudah dihapus tetap
+ * terhitung di kategorinya yang dulu.
+ *
+ * `kategori` NULL = terjual saat produknya belum dikelompokkan. Barisnya sengaja
+ * tetap muncul (jadi "Tanpa Kategori" di UI), tidak disembunyikan — kalau
+ * dibuang, jumlah seluruh kategori tidak akan sama dengan total penjualan dan
+ * laporannya terbaca seperti ada uang yang hilang.
+ */
+export async function penjualanPerKategori(p: Periode): Promise<PenjualanKategori[]> {
+	const db = await getDb();
+	const rows = await db.select<KategoriRow[]>(
+		`SELECT i.kategori AS kategori,
+		        SUM(i.jumlah) AS total_qty,
+		        SUM(i.harga * i.jumlah) AS total_nilai,
+		        SUM(CASE WHEN i.harga_beli IS NOT NULL
+		                 THEN (i.harga - i.harga_beli) * i.jumlah END) AS total_laba,
+		        COALESCE(SUM(CASE WHEN i.harga_beli IS NOT NULL
+		                          THEN i.harga_beli * i.jumlah END), 0) AS total_modal,
+		        COALESCE(SUM(CASE WHEN i.harga_beli IS NULL
+		                          THEN i.harga * i.jumlah END), 0) AS nilai_belum
+		 FROM item_penjualan i
+		 JOIN penjualan p ON p.id = i.penjualan_id
+		 WHERE date(p.tanggal, 'localtime') BETWEEN $1 AND $2
+		 GROUP BY i.kategori
+		 ORDER BY total_nilai DESC`,
+		[p.dari, p.sampai]
+	);
+
+	return rows.map((r) => ({
+		kategori: r.kategori,
+		totalQty: r.total_qty,
+		totalNilai: r.total_nilai,
+		totalLaba: r.total_laba,
+		totalModal: r.total_modal,
+		nilaiBelumTerhitung: r.nilai_belum
 	}));
 }
 

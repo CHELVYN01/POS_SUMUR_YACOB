@@ -9,10 +9,18 @@
 	import { stokLonggar, ubahStokLonggar } from '$lib/stores/pengaturanStok';
 	import { laporanKasirHariIni, ubahLaporanKasirHariIni } from '$lib/stores/pengaturanLaporan';
 	import { hitungBarangTanpaStok } from '$lib/db/barang';
+	import {
+		listKategori,
+		tambahKategori,
+		ubahKategori,
+		hapusKategori,
+		cariKategoriByNama,
+		hitungBarangTanpaKategori
+	} from '$lib/db/kategori';
 	import { toast } from '$lib/stores/toast';
 	import { hapusLisensi, labelPerangkat, labelTier } from '$lib/lisensi';
 	import { lisensi, segarkanLisensi } from '$lib/stores/lisensi';
-	import type { User } from '$lib/types';
+	import type { Kategori, User } from '$lib/types';
 
 	let users = $state<User[]>([]);
 	let loading = $state(true);
@@ -32,6 +40,127 @@
 
 	let produkTanpaStok = $state(0);
 	let menyimpanStok = $state(false);
+
+	// --- Kategori produk ---
+	let kategori = $state<Kategori[]>([]);
+	let produkTanpaKategori = $state(0);
+	let kategoriBaru = $state('');
+	let kategoriError = $state('');
+	let menyimpanKategori = $state(false);
+	/** id kategori yang namanya sedang diubah inline; null = tidak ada. */
+	let editKategoriId = $state<number | null>(null);
+	let editKategoriNama = $state('');
+
+	async function muatKategori() {
+		try {
+			[kategori, produkTanpaKategori] = await Promise.all([
+				listKategori(),
+				hitungBarangTanpaKategori()
+			]);
+		} catch (e) {
+			console.error('Gagal memuat kategori:', e);
+			kategoriError = 'Gagal memuat daftar kategori';
+		}
+	}
+
+	async function simpanKategoriBaru(event: Event) {
+		event.preventDefault();
+		kategoriError = '';
+		const nama = kategoriBaru.trim();
+		if (!nama) {
+			kategoriError = 'Nama kategori wajib diisi';
+			return;
+		}
+
+		// Dicegat di sini, bukan dibiarkan jadi error UNIQUE mentah dari SQLite —
+		// dan pakai pencocokan NOCASE supaya "rokok" tidak lolos di samping "Rokok".
+		// Dua kategori yang bedanya cuma huruf besar-kecil memecah angka laporannya.
+		if (await cariKategoriByNama(nama)) {
+			kategoriError = `Kategori "${nama}" sudah ada`;
+			return;
+		}
+
+		menyimpanKategori = true;
+		try {
+			await tambahKategori(nama);
+			kategoriBaru = '';
+			await muatKategori();
+			toast.sukses(`Kategori "${nama}" ditambahkan`);
+		} catch (e) {
+			console.error('Gagal menambah kategori:', e);
+			kategoriError = 'Gagal menambah kategori';
+		} finally {
+			menyimpanKategori = false;
+		}
+	}
+
+	function mulaiEditKategori(k: Kategori) {
+		editKategoriId = k.id;
+		editKategoriNama = k.nama;
+		kategoriError = '';
+	}
+
+	async function simpanEditKategori() {
+		if (editKategoriId === null) return;
+		const nama = editKategoriNama.trim();
+		const semula = kategori.find((k) => k.id === editKategoriId);
+		if (!nama) {
+			kategoriError = 'Nama kategori wajib diisi';
+			return;
+		}
+		if (semula && semula.nama === nama) {
+			editKategoriId = null;
+			return;
+		}
+
+		const bentrok = await cariKategoriByNama(nama);
+		if (bentrok && bentrok.id !== editKategoriId) {
+			kategoriError = `Kategori "${nama}" sudah ada`;
+			return;
+		}
+
+		menyimpanKategori = true;
+		try {
+			await ubahKategori(editKategoriId, nama);
+			editKategoriId = null;
+			await muatKategori();
+			// Laporan lama TIDAK ikut berubah namanya: kategori disalin ke baris
+			// transaksi saat penjualan terjadi. Itu disengaja — angka yang sudah
+			// dilaporkan tidak boleh bergerak — tapi harus disebut, kalau tidak
+			// pemilik toko mengira laporannya rusak.
+			toast.info('Nama kategori diubah. Penjualan yang sudah tercatat tetap memakai nama lama.');
+		} catch (e) {
+			console.error('Gagal mengubah kategori:', e);
+			kategoriError = 'Gagal mengubah kategori';
+		} finally {
+			menyimpanKategori = false;
+		}
+	}
+
+	async function hapusKategoriIni(k: Kategori) {
+		const peringatan =
+			k.jumlahProduk > 0
+				? `Hapus kategori "${k.nama}"?
+
+${k.jumlahProduk} produk memakainya dan akan jadi ` +
+					'tanpa kategori. Produknya sendiri tidak ikut terhapus, dan laporan penjualan ' +
+					'yang sudah tercatat tetap utuh.'
+				: `Hapus kategori "${k.nama}"?`;
+		if (!confirm(peringatan)) return;
+
+		menyimpanKategori = true;
+		try {
+			await hapusKategori(k.id);
+			if (editKategoriId === k.id) editKategoriId = null;
+			await muatKategori();
+			toast.sukses(`Kategori "${k.nama}" dihapus`);
+		} catch (e) {
+			console.error('Gagal menghapus kategori:', e);
+			kategoriError = 'Gagal menghapus kategori';
+		} finally {
+			menyimpanKategori = false;
+		}
+	}
 
 	async function gantiModeStok(longgar: boolean, target: HTMLInputElement) {
 		// Mematikan centang ini bisa menghentikan penjualan banyak produk sekaligus.
@@ -144,6 +273,7 @@
 		} catch (e) {
 			console.error('Gagal menghitung produk tanpa stok:', e);
 		}
+		await muatKategori();
 		autoBackupDir = await getAutoBackupDir();
 	});
 
@@ -439,6 +569,103 @@
 					{/if}
 				</p>
 			{/if}
+		</section>
+	{/if}
+
+	{#if tab === 'produk' && isAdmin}
+		<section class="card section">
+			<div class="section-header">
+				<h2>Kategori Produk</h2>
+				<span class="muted">{kategori.length} kategori</span>
+			</div>
+
+			<p class="muted">
+				Kategori memisahkan pemasukan di Laporan — misalnya barang titipan yang uangnya
+				dihitung terpisah dari dagangan sendiri. Kategori dipilih per produk di halaman
+				<strong>Produk</strong>.
+			</p>
+
+			<form class="kategori-form" onsubmit={simpanKategoriBaru}>
+				<input
+					bind:value={kategoriBaru}
+					placeholder="mis. Rokok, Titipan, Sembako"
+					disabled={menyimpanKategori}
+				/>
+				<button type="submit" disabled={menyimpanKategori}>+ Tambah</button>
+			</form>
+
+			{#if kategoriError}
+				<p class="error">{kategoriError}</p>
+			{/if}
+
+			{#if kategori.length === 0}
+				<p class="muted">Belum ada kategori. Semua produk masuk "Tanpa Kategori" di laporan.</p>
+			{:else}
+				<table>
+					<thead>
+						<tr>
+							<th>Nama Kategori</th>
+							<th>Dipakai</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each kategori as k (k.id)}
+							<tr>
+								<td>
+									{#if editKategoriId === k.id}
+										<!-- svelte-ignore a11y_autofocus -->
+										<input
+											class="edit-kategori"
+											bind:value={editKategoriNama}
+											disabled={menyimpanKategori}
+											onkeydown={(e) => {
+												if (e.key === 'Enter') {
+													e.preventDefault();
+													simpanEditKategori();
+												} else if (e.key === 'Escape') {
+													editKategoriId = null;
+												}
+											}}
+											autofocus
+										/>
+									{:else}
+										{k.nama}
+									{/if}
+								</td>
+								<td class="muted">{k.jumlahProduk} produk</td>
+								<td class="action">
+									{#if editKategoriId === k.id}
+										<button onclick={simpanEditKategori} disabled={menyimpanKategori}>
+											Simpan
+										</button>
+										<button onclick={() => (editKategoriId = null)}>Batal</button>
+									{:else}
+										<button onclick={() => mulaiEditKategori(k)}>Ubah Nama</button>
+										<button onclick={() => hapusKategoriIni(k)} disabled={menyimpanKategori}>
+											Hapus
+										</button>
+									{/if}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
+
+			{#if produkTanpaKategori > 0}
+				<p class="catatan">
+					<strong>{produkTanpaKategori} produk</strong> belum punya kategori. Penjualannya tetap
+					tercatat, tapi di Laporan masuk ke baris "Tanpa Kategori".
+				</p>
+			{/if}
+
+			<p class="catatan">
+				Menghapus kategori tidak menghapus produknya — produk itu cuma kembali tanpa kategori.
+				Laporan penjualan yang sudah tercatat juga tidak berubah: nama kategori disalin saat
+				transaksi terjadi, supaya angka bulan lalu tidak ikut bergeser waktu kategorinya
+				dirapikan hari ini.
+			</p>
 		</section>
 	{/if}
 
@@ -786,6 +1013,20 @@
 		color: var(--text-muted);
 		font-size: 0.88rem;
 		margin-top: 0;
+	}
+
+	.kategori-form {
+		display: flex;
+		gap: 0.6rem;
+		margin-bottom: 0.8rem;
+	}
+
+	.kategori-form input {
+		flex: 1;
+	}
+
+	.edit-kategori {
+		width: 100%;
 	}
 
 	.toko-form {

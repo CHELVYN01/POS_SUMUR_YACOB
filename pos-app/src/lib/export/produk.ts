@@ -20,11 +20,20 @@ const BORDER_TIPIS: Partial<ExcelJS.Borders> = {
  * (bukan urutannya) supaya kolom yang digeser/disisipi user tidak merusak import.
  */
 const NAMA_SHEET = 'Produk';
-const HEADER = ['ID', 'Barcode', 'Nama Produk', 'Harga Beli', 'Harga Jual', 'Stok'] as const;
+const HEADER = [
+	'ID',
+	'Barcode',
+	'Nama Produk',
+	'Kategori',
+	'Harga Beli',
+	'Harga Jual',
+	'Stok'
+] as const;
 const LEBAR = [
 	{ width: 8 },
 	{ width: 20 },
 	{ width: 32 },
+	{ width: 18 },
 	{ width: 14 },
 	{ width: 14 },
 	{ width: 10 }
@@ -60,9 +69,10 @@ export async function exportProdukExcel(produk: Barang[]): Promise<boolean> {
 	ws.mergeCells(3, 1, 3, HEADER.length);
 	const petunjuk = ws.getCell(3, 1);
 	petunjuk.value =
-		'Silakan edit Barcode / Nama / Harga Beli / Harga Jual / Stok, lalu import kembali lewat menu Produk. ' +
+		'Silakan edit Barcode / Nama / Kategori / Harga Beli / Harga Jual / Stok, lalu import kembali lewat menu Produk. ' +
 		'Kolom ID jangan diubah. Baris baru boleh ditambah di bawah (ID dikosongkan). ' +
 		'Harga Beli boleh dikosongkan, tapi produk tanpa harga beli tidak ikut dihitung labanya. ' +
+		'Kategori yang belum terdaftar akan dibuat otomatis saat import — perhatikan ejaannya. ' +
 		'Baris yang dihapus di sini TIDAK menghapus produk di aplikasi.';
 	petunjuk.font = { size: 9, color: { argb: 'FF767671' } };
 	petunjuk.alignment = { vertical: 'middle', wrapText: false };
@@ -84,13 +94,16 @@ export async function exportProdukExcel(produk: Barang[]): Promise<boolean> {
 		row.getCell(1).value = b.id;
 		row.getCell(2).value = b.barcode ?? '';
 		row.getCell(3).value = b.nama;
+		// produk tanpa kategori ditulis kosong; import membacanya sebagai "tanpa
+		// kategori", bukan sebagai kategori bernama "-"
+		row.getCell(4).value = b.kategoriNama ?? '';
 		// harga beli belum diisi ditulis kosong, bukan 0 — 0 berarti barangnya gratis
-		row.getCell(4).value = b.hargaBeli === null ? '' : b.hargaBeli;
-		row.getCell(4).numFmt = RUPIAH_FMT;
-		row.getCell(5).value = b.harga;
+		row.getCell(5).value = b.hargaBeli === null ? '' : b.hargaBeli;
 		row.getCell(5).numFmt = RUPIAH_FMT;
+		row.getCell(6).value = b.harga;
+		row.getCell(6).numFmt = RUPIAH_FMT;
 		// stok tak dilacak ditulis kosong, bukan 0 — 0 berarti "habis", beda artinya
-		row.getCell(6).value = b.qty === null ? '' : b.qty;
+		row.getCell(7).value = b.qty === null ? '' : b.qty;
 
 		for (let c = 1; c <= HEADER.length; c++) {
 			row.getCell(c).border = BORDER_TIPIS;
@@ -129,6 +142,8 @@ export type BarisProduk = {
 	/** `null` = kolomnya dikosongkan; labanya tidak dihitung, tidak dianggap 0. */
 	hargaBeli: number | null;
 	qty: number | null;
+	/** `null` = kolomnya dikosongkan, artinya produk ini tanpa kategori. */
+	kategori: string | null;
 };
 
 export type ErrorBaris = { baris: number; pesan: string };
@@ -146,6 +161,14 @@ export type HasilBaca = {
 	 * sama sekali saat import.
 	 */
 	adaKolomHargaBeli: boolean;
+	/**
+	 * Apakah file punya kolom Kategori sama sekali.
+	 *
+	 * Alasannya sama dengan Harga Beli: file hasil export versi sebelum fitur
+	 * kategori tidak punya kolom itu, dan tanpa penanda ini seluruh barisnya
+	 * terbaca "tanpa kategori" lalu menghapus pengelompokan yang sudah dirapikan.
+	 */
+	adaKolomKategori: boolean;
 };
 
 /** Isi sel Excel bisa berupa rich text, rumus, atau hyperlink — semuanya diratakan jadi teks. */
@@ -203,7 +226,8 @@ const ALIAS: Record<keyof Omit<BarisProduk, 'baris'>, string[]> = {
 	// "modal" & "kulakan" ikut dikenali — itu istilah yang lebih sering dipakai
 	// pemilik warung daripada "harga beli"
 	hargaBeli: ['hargabeli', 'hargamodal', 'modal', 'kulakan', 'hargakulakan', 'beli'],
-	qty: ['stok', 'qty', 'stokqty', 'jumlah', 'stock']
+	qty: ['stok', 'qty', 'stokqty', 'jumlah', 'stock'],
+	kategori: ['kategori', 'category', 'kelompok', 'jenis', 'golongan']
 };
 
 type PetaKolom = { [K in keyof typeof ALIAS]: number | null };
@@ -222,7 +246,8 @@ function cariHeader(ws: ExcelJS.Worksheet): { row: number; kolom: PetaKolom } | 
 			nama: null,
 			harga: null,
 			hargaBeli: null,
-			qty: null
+			qty: null,
+			kategori: null
 		};
 
 		for (let c = 1; c <= Math.max(row.cellCount, 1); c++) {
@@ -291,6 +316,7 @@ export async function bacaProdukExcel(): Promise<HasilBaca | null> {
 		const qtySel = kolom.qty === null ? null : angkaSel(row.getCell(kolom.qty));
 		const hargaBeliSel = kolom.hargaBeli === null ? null : angkaSel(row.getCell(kolom.hargaBeli));
 		const idSel = kolom.id === null ? null : angkaSel(row.getCell(kolom.id));
+		const kategoriSel = kolom.kategori === null ? '' : teksSel(row.getCell(kolom.kategori));
 
 		// baris kosong di tengah/akhir tabel itu wajar, bukan kesalahan
 		if (
@@ -299,7 +325,8 @@ export async function bacaProdukExcel(): Promise<HasilBaca | null> {
 			hargaSel === null &&
 			qtySel === null &&
 			idSel === null &&
-			hargaBeliSel === null
+			hargaBeliSel === null &&
+			!kategoriSel
 		) {
 			continue;
 		}
@@ -344,10 +371,19 @@ export async function bacaProdukExcel(): Promise<HasilBaca | null> {
 			// harga & stok disimpan INTEGER di database; pecahan dibulatkan, bukan ditolak
 			harga: Math.round(hargaSel as number),
 			hargaBeli: hargaBeliSel === null ? null : Math.round(hargaBeliSel),
-			qty: qtySel === null ? null : Math.round(qtySel)
+			qty: qtySel === null ? null : Math.round(qtySel),
+			// dikosongkan = tanpa kategori; nama kategorinya sendiri tidak divalidasi
+			// di sini, yang belum terdaftar dibuat saat import dijalankan
+			kategori: kategoriSel || null
 		});
 	}
 
 	const namaFile = path.split(/[\\/]/).pop() ?? path;
-	return { namaFile, baris, error, adaKolomHargaBeli: kolom.hargaBeli !== null };
+	return {
+		namaFile,
+		baris,
+		error,
+		adaKolomHargaBeli: kolom.hargaBeli !== null,
+		adaKolomKategori: kolom.kategori !== null
+	};
 }
