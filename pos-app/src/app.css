@@ -7,8 +7,12 @@
 	--accent: #2f6e4f;
 	--accent-hover: #245a40;
 	--danger: #b3432f;
+	--warning: #b54708;
 
 	--radius: 10px;
+	/* Tinggi top bar. Dipakai halaman yang menghitung tinggi panelnya sendiri
+	   (kasir, produk) — jangan di-hardcode ulang di sana. */
+	--topbar-h: 60px;
 	--font: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
@@ -21,6 +25,7 @@
 	--accent: #3f9268;
 	--accent-hover: #4ba876;
 	--danger: #d16a53;
+	--warning: #d99038;
 }
 
 body {

@@ -789,7 +789,7 @@
 		display: grid;
 		grid-template-columns: 1fr 320px;
 		gap: 1.5rem;
-		height: calc(100vh - 56px - 4rem);
+		height: calc(100vh - var(--topbar-h) - 4rem);
 		overflow: hidden;
 	}
 

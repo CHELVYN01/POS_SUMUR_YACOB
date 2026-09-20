@@ -23,7 +23,47 @@
 
 	const PER_HALAMAN = 100;
 
+	/**
+	 * Di bawah angka ini stok ditandai kuning "sisa". Gunanya sekadar isyarat visual
+	 * saat memindai daftar — bukan aturan yang menghalangi penjualan, itu urusan
+	 * mode stok ketat.
+	 */
+	const BATAS_STOK_MENIPIS = 5;
+
+	/** Baris yang menu titik-tiganya sedang terbuka. */
+	let menuBarisId = $state<number | null>(null);
+	/**
+	 * Posisi layar menu titik-tiga. Menunya dipasang `fixed` dan digambar di luar
+	 * tabel: kalau ikut mengalir di dalam .list-table-wrap yang ber-`overflow`,
+	 * baris terakhir akan memotongnya dan isinya harus digulung dulu untuk terlihat —
+	 * z-index tidak menolong, elemen yang terpotong overflow tetap terpotong.
+	 */
+	let menuPos = $state({ atas: 0, kanan: 0 });
+
+	function bukaMenuBaris(event: MouseEvent, id: number) {
+		event.stopPropagation();
+		if (menuBarisId === id) {
+			menuBarisId = null;
+			return;
+		}
+
+		const tombol = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		const TINGGI_MENU = 88;
+		// Dibalik ke atas tombol kalau ruang di bawahnya tidak cukup, supaya menu
+		// baris terakhir tidak terdorong keluar layar.
+		const muatDiBawah = window.innerHeight - tombol.bottom > TINGGI_MENU;
+		menuPos = {
+			atas: muatDiBawah ? tombol.bottom + 4 : tombol.top - TINGGI_MENU - 4,
+			kanan: window.innerWidth - tombol.right
+		};
+		menuBarisId = id;
+	}
+
 	let barangList = $state<Barang[]>([]);
+	/** Produk yang menu titik-tiganya terbuka; null kalau barisnya sudah tidak tampil. */
+	let barangMenu = $derived(
+		menuBarisId === null ? null : (barangList.find((b) => b.id === menuBarisId) ?? null)
+	);
 	let totalBarang = $state(0);
 	let loading = $state(true);
 	let cari = $state('');
@@ -127,6 +167,14 @@
 	 */
 	let barcodeTerkunci = $state<string | null>(null);
 
+	/**
+	 * Form dan log tidak lagi menempel permanen di kolom kiri — keduanya panel geser.
+	 * Daftar produk yang dipakai sehari-hari jadi dapat lebar penuh; form cuma dibuka
+	 * saat benar-benar menambah/mengubah barang.
+	 */
+	let panelForm = $state(false);
+	let panelLog = $state(false);
+
 	let barcodeInput = $state<HTMLInputElement | null>(null);
 
 	let log = $state<LogAktivitas[]>([]);
@@ -149,6 +197,10 @@
 		// selagi pratinjau import terbuka, kolom barcode ada di belakang overlay —
 		// menariknya kembali fokus bikin ketikan/scan mendarat di kolom yang tak terlihat
 		if (rencana !== null) return;
+		// Alasan yang sama saat panel form tertutup: kolom barcode tidak dirender sama
+		// sekali, jadi menariknya fokus hanya membuang fokus dari kolom cari yang
+		// sedang dipakai kasir.
+		if (!panelForm) return;
 		const formKosong =
 			editId === null &&
 			!barcode &&
@@ -339,6 +391,8 @@
 			return;
 		}
 
+		const tadinyaEdit = editId !== null;
+
 		try {
 			if (editId !== null) {
 				await updateBarang(editId, input);
@@ -364,7 +418,15 @@
 
 		muatUlang();
 		resetForm();
-		barcodeInput?.focus();
+
+		// Edit itu tugas sekali selesai, jadi panelnya ditutup. Menambah barang
+		// biasanya berturut-turut sambil membongkar belanjaan, jadi panelnya
+		// dibiarkan terbuka dengan fokus balik ke kolom barcode untuk scan berikutnya.
+		if (tadinyaEdit) {
+			panelForm = false;
+		} else {
+			barcodeInput?.focus();
+		}
 	}
 
 	function edit(barang: Barang) {
@@ -378,6 +440,31 @@
 		hargaBeli = barang.hargaBeli ?? undefined;
 		qty = barang.qty ?? undefined;
 		formError = '';
+		bukaPanelForm();
+	}
+
+	/**
+	 * Fokus dipasang setelah panel benar-benar dirender. Kolom barcode tidak ada di
+	 * DOM selagi panel tertutup, jadi memanggil focus() di baris yang sama dengan
+	 * `panelForm = true` akan mengenai elemen yang belum lahir dan scan mendarat
+	 * entah ke mana.
+	 */
+	function bukaPanelForm() {
+		panelForm = true;
+		setTimeout(() => {
+			if (barcodeTerkunci === null) barcodeInput?.focus();
+		}, 0);
+	}
+
+	function tambahBaru() {
+		resetForm();
+		bukaPanelForm();
+	}
+
+	/** Menutup panel selalu mengosongkan form — panel yang dibuka lagi mulai bersih. */
+	function tutupPanelForm() {
+		panelForm = false;
+		resetForm();
 	}
 
 	async function hapus(id: number) {
@@ -493,8 +580,25 @@
 		namaFileImport = '';
 	}
 
+	/**
+	 * Esc menutup yang paling atas dulu. Tanpa urutan ini, satu tekan Esc di atas
+	 * pratinjau import juga ikut menutup panel form di belakangnya.
+	 */
 	function tutupDenganEsc(event: KeyboardEvent) {
-		if (event.key === 'Escape' && rencana !== null && !sedangTerapkan) batalImport();
+		if (event.key !== 'Escape') return;
+		if (rencana !== null) {
+			if (!sedangTerapkan) batalImport();
+			return;
+		}
+		if (panelForm) {
+			tutupPanelForm();
+			return;
+		}
+		if (panelLog) {
+			panelLog = false;
+			return;
+		}
+		menuBarisId = null;
 	}
 
 	function resetForm() {
@@ -511,147 +615,34 @@
 </script>
 
 <div class="produk">
-	<div class="side-col">
-		<section class="card form-panel">
-			<h2>{editId !== null ? 'Edit Produk' : 'Tambah Produk'}</h2>
-			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-			<form onsubmit={simpan} onkeydown={tahanEnter}>
-				<label for="barcode">
-					Barcode
-					{#if barcodeTerkunci !== null}
-						<span class="opt terkunci">(terkunci — klik kolom di bawah untuk mengisi)</span>
-					{:else}
-						<span class="opt required">(wajib, scan atau ketik manual)</span>
-					{/if}
-				</label>
-				<div class="barcode-row">
-					<input
-						id="barcode"
-						bind:value={barcode}
-						bind:this={barcodeInput}
-						onkeydown={scanBarcode}
-						readonly={barcodeTerkunci !== null}
-						placeholder="Scan barcode di sini..."
-						autofocus
-					/>
-					{#if barcodeTerkunci !== null}
-						<button type="button" class="ganti" onclick={gantiBarcode}>Ganti</button>
-					{/if}
-				</div>
-
-				<label for="nama">Nama Produk <span class="opt required">(wajib)</span></label>
-				<input
-					id="nama"
-					bind:value={nama}
-					placeholder="mis. Beras 5kg"
-					use:manualSaja={alihkanScan}
-				/>
-
-				<label for="harga-beli">Harga Beli / Modal (Rp) <span class="opt">(opsional)</span></label>
-				<input
-					id="harga-beli"
-					type="number"
-					min="0"
-					bind:value={hargaBeli}
-					placeholder="kosongkan jika belum tahu"
-					use:manualSaja={alihkanScan}
-				/>
-
-				<label for="harga">Harga Jual (Rp) <span class="opt required">(wajib)</span></label>
-				<input
-					id="harga"
-					type="number"
-					min="0"
-					bind:value={harga}
-					placeholder="mis. 65000"
-					use:manualSaja={alihkanScan}
-				/>
-
-				{#if margin}
-					<p class="margin" class:rugi={margin.untung < 0}>
-						{margin.untung < 0 ? 'Rugi' : 'Untung'}
-						{formatRupiah(Math.abs(margin.untung))} per barang{margin.persen === null
-							? ''
-							: ` · ${margin.untung < 0 ? '-' : ''}${Math.abs(margin.persen)}%`}
-					</p>
-				{/if}
-
-				<label for="qty">
-					Stok / Qty
-					{#if $stokLonggar}
-						<span class="opt">(opsional)</span>
-					{:else}
-						<span class="opt required">(wajib)</span>
-					{/if}
-				</label>
-				<input
-					id="qty"
-					type="number"
-					min="0"
-					bind:value={qty}
-					placeholder={$stokLonggar ? 'kosongkan jika tidak dihitung' : 'mis. 20'}
-					use:manualSaja={alihkanScan}
-				/>
-
-				{#if formError}
-					<p class="error">{formError}</p>
-				{/if}
-
-				<div class="form-actions">
-					{#if editId !== null}
-						<button type="button" onclick={resetForm}>Batal</button>
-					{/if}
-					<button type="submit" class="primary">{editId !== null ? 'Simpan Perubahan' : 'Tambah Produk'}</button>
-				</div>
-			</form>
-		</section>
-
-		<section class="log-panel card">
-			<div class="log-head">
-				<h2>Log Aktivitas</h2>
-				<span class="log-ket">24 jam terakhir</span>
-			</div>
-			<div class="log-list">
-				{#if log.length === 0}
-					<p class="empty">Belum ada aktivitas</p>
-				{:else}
-					{#each log as entry (entry.id)}
-						<div class="log-entry">
-							<span class="log-time">{formatWaktu(entry.waktu)}</span>
-							<span class="log-msg">
-								{entry.pesan}
-								{#if entry.userNama}<span class="log-user">· {entry.userNama}</span>{/if}
-							</span>
-						</div>
-					{/each}
-				{/if}
-			</div>
-		</section>
-	</div>
-
 	<section class="list-panel">
-		<!-- Judul & kolom cari duduk di luar kotak scroll tabel, jadi tetap di tempat
-		     tanpa perlu sticky: yang menggulung cuma .list-table-wrap di bawahnya.
-		     Pola yang sama dipakai daftar produk di Kasir. -->
+		<!-- Judul, kolom cari & tombol duduk di luar kotak scroll tabel, jadi tetap di
+		     tempat tanpa perlu sticky: yang menggulung cuma .list-table-wrap. -->
 		<div class="list-sticky">
 			<div class="list-head">
-				<h1>Daftar Produk</h1>
-				<span class="jumlah">
-					{#if totalBarang === 0}
-						0 produk
-					{:else}
-						{dariNomor}-{sampaiNomor} dari {totalBarang} produk
-					{/if}
-				</span>
+				<div class="list-judul">
+					<h1>Daftar Produk</h1>
+					<span class="jumlah">
+						{#if totalBarang === 0}
+							0 produk
+						{:else}
+							{dariNomor}-{sampaiNomor} dari {totalBarang} produk
+						{/if}
+					</span>
+				</div>
+
 				<div class="list-actions">
+					<button onclick={() => (panelLog = true)}>Log</button>
 					<button onclick={jalankanExport} disabled={sedangExport}>
 						{sedangExport ? 'Menyiapkan...' : 'Export Excel'}
 					</button>
 					<button onclick={jalankanImport} disabled={sedangImport}>
 						{sedangImport ? 'Membaca...' : 'Import Excel'}
 					</button>
+					<button class="primary" onclick={tambahBaru}>+ Tambah Produk</button>
 				</div>
 			</div>
+
 			<input
 				class="search"
 				placeholder="Cari nama produk atau barcode..."
@@ -660,15 +651,17 @@
 			/>
 		</div>
 
-		<div class="list-table-wrap">
+		<!-- Menu titik-tiga dipasang `fixed`, jadi ia tidak ikut bergerak saat daftar
+		     digulung. Ditutup saat scroll supaya tidak menggantung lepas dari barisnya. -->
+		<div class="list-table-wrap" onscroll={() => (menuBarisId = null)}>
 			<table>
 				<thead>
 					<tr>
 						<th>Nama Produk</th>
 						<th>Barcode</th>
-						<th>Harga Beli</th>
-						<th>Harga Jual</th>
-						<th>Untung</th>
+						<th class="num">Harga Beli</th>
+						<th class="num">Harga Jual</th>
+						<th class="num">Untung</th>
 						<th>Stok</th>
 						<th></th>
 					</tr>
@@ -685,19 +678,39 @@
 					{:else}
 						{#each barangList as barang (barang.id)}
 							<tr>
-								<td>{barang.nama}</td>
-								<td class="mono">{barang.barcode ?? '-'}</td>
-								<td class:kosong={barang.hargaBeli === null}>
-									{barang.hargaBeli === null ? 'belum diisi' : formatRupiah(barang.hargaBeli)}
+								<td class="nama-sel">{barang.nama}</td>
+								<td class="mono">{barang.barcode ?? '—'}</td>
+								<td class="num" class:kosong={barang.hargaBeli === null}>
+									{barang.hargaBeli === null ? '—' : formatRupiah(barang.hargaBeli)}
 								</td>
-								<td>{formatRupiah(barang.harga)}</td>
-								<td class:rugi={barang.hargaBeli !== null && barang.harga < barang.hargaBeli}>
-									{barang.hargaBeli === null ? '-' : formatRupiah(barang.harga - barang.hargaBeli)}
+								<td class="num">{formatRupiah(barang.harga)}</td>
+								<td class="num" class:rugi={barang.hargaBeli !== null && barang.harga < barang.hargaBeli}>
+									{barang.hargaBeli === null ? '—' : formatRupiah(barang.harga - barang.hargaBeli)}
 								</td>
-								<td>{barang.qty === null ? '-' : barang.qty}</td>
+								<td>
+									{#if barang.qty === null}
+										<span class="stok stok-null" title="Stok tidak dihitung untuk produk ini">—</span>
+									{:else if barang.qty === 0}
+										<span class="stok stok-habis">Habis</span>
+									{:else if barang.qty <= BATAS_STOK_MENIPIS}
+										<span class="stok stok-menipis">{barang.qty} sisa</span>
+									{:else}
+										<span class="stok stok-aman">{barang.qty}</span>
+									{/if}
+								</td>
 								<td class="action">
-									<button onclick={() => edit(barang)}>Edit</button>
-									<button onclick={() => hapus(barang.id)}>Hapus</button>
+									<button
+										class="aksi-btn"
+										onclick={(e) => bukaMenuBaris(e, barang.id)}
+										aria-label="Aksi untuk {barang.nama}"
+										aria-expanded={menuBarisId === barang.id}
+									>
+										<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+											<circle cx="12" cy="5" r="1.6" />
+											<circle cx="12" cy="12" r="1.6" />
+											<circle cx="12" cy="19" r="1.6" />
+										</svg>
+									</button>
 								</td>
 							</tr>
 						{/each}
@@ -720,7 +733,189 @@
 	</section>
 </div>
 
-<svelte:window onkeydown={tutupDenganEsc} />
+<!-- Panel form. Dirender hanya saat terbuka: kolom barcode di dalamnya jadi tidak
+     ada di DOM selagi tertutup, sehingga tidak bisa diam-diam menangkap scan. -->
+{#if panelForm}
+	<div
+		class="panel-overlay"
+		role="presentation"
+		onclick={(e) => {
+			if (e.target === e.currentTarget) tutupPanelForm();
+		}}
+	>
+		<div class="panel" role="dialog" aria-modal="true" aria-label="Form produk">
+			<div class="panel-head">
+				<h2>{editId !== null ? 'Edit Produk' : 'Tambah Produk'}</h2>
+				<button class="panel-tutup" onclick={tutupPanelForm} aria-label="Tutup">
+					<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+						<path d="M18 6 6 18M6 6l12 12" />
+					</svg>
+				</button>
+			</div>
+
+			<div class="panel-isi">
+				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+		<form onsubmit={simpan} onkeydown={tahanEnter}>
+			<label for="barcode">
+				Barcode
+				{#if barcodeTerkunci !== null}
+					<span class="opt terkunci">(terkunci — klik kolom di bawah untuk mengisi)</span>
+				{:else}
+					<span class="opt required">(wajib, scan atau ketik manual)</span>
+				{/if}
+			</label>
+			<div class="barcode-row">
+				<input
+					id="barcode"
+					bind:value={barcode}
+					bind:this={barcodeInput}
+					onkeydown={scanBarcode}
+					readonly={barcodeTerkunci !== null}
+					placeholder="Scan barcode di sini..."
+					autofocus
+				/>
+				{#if barcodeTerkunci !== null}
+					<button type="button" class="ganti" onclick={gantiBarcode}>Ganti</button>
+				{/if}
+			</div>
+
+			<label for="nama">Nama Produk <span class="opt required">(wajib)</span></label>
+			<input
+				id="nama"
+				bind:value={nama}
+				placeholder="mis. Beras 5kg"
+				use:manualSaja={alihkanScan}
+			/>
+
+			<label for="harga-beli">Harga Beli / Modal (Rp) <span class="opt">(opsional)</span></label>
+			<input
+				id="harga-beli"
+				type="number"
+				min="0"
+				bind:value={hargaBeli}
+				placeholder="kosongkan jika belum tahu"
+				use:manualSaja={alihkanScan}
+			/>
+
+			<label for="harga">Harga Jual (Rp) <span class="opt required">(wajib)</span></label>
+			<input
+				id="harga"
+				type="number"
+				min="0"
+				bind:value={harga}
+				placeholder="mis. 65000"
+				use:manualSaja={alihkanScan}
+			/>
+
+			{#if margin}
+				<p class="margin" class:rugi={margin.untung < 0}>
+					{margin.untung < 0 ? 'Rugi' : 'Untung'}
+					{formatRupiah(Math.abs(margin.untung))} per barang{margin.persen === null
+						? ''
+						: ` · ${margin.untung < 0 ? '-' : ''}${Math.abs(margin.persen)}%`}
+				</p>
+			{/if}
+
+			<label for="qty">
+				Stok / Qty
+				{#if $stokLonggar}
+					<span class="opt">(opsional)</span>
+				{:else}
+					<span class="opt required">(wajib)</span>
+				{/if}
+			</label>
+			<input
+				id="qty"
+				type="number"
+				min="0"
+				bind:value={qty}
+				placeholder={$stokLonggar ? 'kosongkan jika tidak dihitung' : 'mis. 20'}
+				use:manualSaja={alihkanScan}
+			/>
+
+			{#if formError}
+				<p class="error">{formError}</p>
+			{/if}
+
+			<div class="form-actions">
+				{#if editId !== null}
+					<button type="button" onclick={resetForm}>Batal</button>
+				{/if}
+				<button type="submit" class="primary">{editId !== null ? 'Simpan Perubahan' : 'Tambah Produk'}</button>
+			</div>
+		</form>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Panel log aktivitas -->
+{#if panelLog}
+	<div
+		class="panel-overlay"
+		role="presentation"
+		onclick={(e) => {
+			if (e.target === e.currentTarget) panelLog = false;
+		}}
+	>
+		<div class="panel" role="dialog" aria-modal="true" aria-label="Log aktivitas">
+			<div class="panel-head">
+				<div class="log-judul">
+					<h2>Log Aktivitas</h2>
+					<span class="log-ket">24 jam terakhir</span>
+				</div>
+				<button class="panel-tutup" onclick={() => (panelLog = false)} aria-label="Tutup">
+					<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+						<path d="M18 6 6 18M6 6l12 12" />
+					</svg>
+				</button>
+			</div>
+
+			<div class="panel-isi">
+				<div class="log-list">
+					{#if log.length === 0}
+						<p class="empty">Belum ada aktivitas</p>
+					{:else}
+						{#each log as entry (entry.id)}
+							<div class="log-entry">
+								<span class="log-time">{formatWaktu(entry.waktu)}</span>
+								<span class="log-msg">
+									{entry.pesan}
+									{#if entry.userNama}<span class="log-user">· {entry.userNama}</span>{/if}
+								</span>
+							</div>
+						{/each}
+					{/if}
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Menu baris digambar di luar tabel supaya tidak terpotong kotak scroll-nya.
+     `barangMenu` dicari dari daftar yang sedang tampil, jadi menu ikut tertutup
+     sendiri kalau barisnya hilang karena pencarian atau pindah halaman. -->
+{#if barangMenu}
+	<div
+		class="baris-menu"
+		style="top: {menuPos.atas}px; right: {menuPos.kanan}px;"
+		role="menu"
+		tabindex="-1"
+		onclick={(e) => e.stopPropagation()}
+		onkeydown={() => {}}
+	>
+		<button role="menuitem" onclick={() => { menuBarisId = null; edit(barangMenu); }}>Edit</button>
+		<button
+			class="menu-hapus"
+			role="menuitem"
+			onclick={() => { const id = barangMenu.id; menuBarisId = null; hapus(id); }}
+		>
+			Hapus
+		</button>
+	</div>
+{/if}
+
+<svelte:window onkeydown={tutupDenganEsc} onclick={() => (menuBarisId = null)} />
 
 {#if rencana}
 	<div class="import-overlay" role="presentation">
@@ -805,32 +1000,78 @@
 {/if}
 
 <style>
+	/* Form & log pindah ke panel geser, jadi daftar produk memakai lebar penuh. */
 	.produk {
-		display: grid;
-		grid-template-columns: 300px 1fr;
-		gap: 1.5rem;
-		align-items: start;
+		display: block;
 	}
 
-	.side-col {
+	/* ---------- Panel geser ---------- */
+
+	.panel-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 60;
+		display: flex;
+		justify-content: flex-end;
+		background: rgba(0, 0, 0, 0.35);
+	}
+
+	.panel {
+		width: 380px;
+		max-width: 100vw;
+		height: 100%;
 		display: flex;
 		flex-direction: column;
-		gap: 1.5rem;
-		position: sticky;
-		top: 0;
-		/* Kalau kolom ini lebih tinggi dari layar, sticky tidak menolong: bagian atasnya
-		   (form Tambah Produk) tetap tergulung keluar. Tingginya dibatasi setinggi area
-		   konten — 56px navbar + 2rem sisa padding — dan log yang menyusut. */
-		max-height: calc(100vh - 56px - 2rem);
+		background: var(--surface);
+		border-left: 1px solid var(--border);
+		box-shadow: -8px 0 28px rgba(0, 0, 0, 0.14);
 	}
 
-	.form-panel {
-		padding: 1.25rem;
+	.panel-head {
 		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 1rem 1.25rem;
+		border-bottom: 1px solid var(--border);
 	}
 
-	.form-panel h2 {
-		font-size: 1.05rem;
+	.panel-head h2 {
+		margin: 0;
+		font-size: 1.02rem;
+	}
+
+	.log-judul {
+		display: flex;
+		align-items: baseline;
+		gap: 0.6rem;
+		min-width: 0;
+	}
+
+	.panel-tutup {
+		width: 32px;
+		height: 32px;
+		flex-shrink: 0;
+		padding: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-muted);
+	}
+
+	.panel-tutup:hover {
+		color: var(--text);
+	}
+
+	/* Isi panel yang menggulung, bukan panelnya — kepala panel tetap di tempat. */
+	.panel-isi {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		padding: 0 1.25rem 1.25rem 1.25rem;
+		display: flex;
+		flex-direction: column;
 	}
 
 	form {
@@ -916,9 +1157,17 @@
 
 	.list-head {
 		display: flex;
-		align-items: baseline;
+		align-items: center;
 		justify-content: space-between;
 		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.list-judul {
+		display: flex;
+		align-items: baseline;
+		gap: 0.7rem;
+		min-width: 0;
 	}
 
 	/*
@@ -927,12 +1176,12 @@
 	 * kolom cari — walau sticky — rebutan scrollport dengan tabelnya dan menyisakan
 	 * celah tempat baris produk terlihat lewat.
 	 *
-	 * 56px navbar + 4rem padding .content (atas & bawah).
+	 * tinggi top bar + 4rem padding .content (atas & bawah).
 	 */
 	.list-panel {
 		display: flex;
 		flex-direction: column;
-		max-height: calc(100vh - 56px - 4rem);
+		max-height: calc(100vh - var(--topbar-h) - 4rem);
 		position: sticky;
 		top: 0;
 	}
@@ -977,6 +1226,56 @@
 	.list-actions button {
 		font-size: 0.82rem;
 		padding: 0.4rem 0.75rem;
+	}
+
+	/* ---------- Isi tabel ---------- */
+
+	.nama-sel {
+		font-weight: 500;
+	}
+
+	/* Angka rata kanan dengan lebar digit seragam supaya satuan ribuan berbaris
+	   lurus ke bawah — tanpa itu mata harus membaca tiap angka satu per satu
+	   untuk membandingkan harga. */
+	th.num,
+	td.num {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* ---------- Badge stok ---------- */
+
+	.stok {
+		display: inline-block;
+		padding: 0.15rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.78rem;
+		font-weight: 500;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+
+	.stok-aman {
+		background: var(--bg);
+		color: var(--text-muted);
+	}
+
+	/* Stok habis diberi warna paling kuat: selama mode stok ketat menyala, produk
+	   ini tidak bisa dijual sama sekali — itu hal yang harus terlihat saat memindai
+	   daftar, bukan baru ketahuan waktu kasir melayani pembeli. */
+	.stok-habis {
+		background: color-mix(in srgb, var(--danger) 14%, transparent);
+		color: var(--danger);
+	}
+
+	.stok-menipis {
+		background: color-mix(in srgb, var(--warning) 15%, transparent);
+		color: var(--warning);
+	}
+
+	.stok-null {
+		color: var(--text-muted);
+		padding-left: 0;
 	}
 
 	.import-overlay {
@@ -1177,29 +1476,54 @@
 	.action {
 		text-align: right;
 		white-space: nowrap;
+		width: 1%;
 	}
 
-	.action button {
-		margin-left: 0.4rem;
+	.aksi-btn {
+		width: 30px;
+		height: 30px;
+		padding: 0;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-muted);
 	}
 
-	.log-panel {
-		padding: 1.25rem;
+	.aksi-btn:hover {
+		color: var(--text);
+	}
+
+	.baris-menu {
+		position: fixed;
+		z-index: 40;
+		min-width: 120px;
+		padding: 0.3rem;
 		display: flex;
 		flex-direction: column;
-		min-height: 0;
+		gap: 0.15rem;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
 	}
 
-	.log-panel h2 {
-		font-size: 0.95rem;
-		margin-bottom: 0.75rem;
+	.baris-menu button {
+		width: 100%;
+		padding: 0.45rem 0.6rem;
+		border: none;
+		background: none;
+		border-radius: 6px;
+		text-align: left;
+		font-size: 0.84rem;
+		color: var(--text);
 	}
 
-	.log-head {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 0.75rem;
+	.baris-menu button:hover {
+		background: var(--bg);
+	}
+
+	.baris-menu .menu-hapus {
+		color: var(--danger);
 	}
 
 	.log-ket {

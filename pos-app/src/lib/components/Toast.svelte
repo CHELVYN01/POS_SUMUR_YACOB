@@ -20,7 +20,7 @@
 <style>
 	.toast-wrap {
 		position: fixed;
-		/* Di atas sidebar dan modal, tapi tetap jauh dari kolom scan supaya tidak
+		/* Di atas top bar dan modal, tapi tetap jauh dari kolom scan supaya tidak
 		   menutupi kursor yang sedang dipakai kasir. */
 		bottom: 1.25rem;
 		right: 1.25rem;

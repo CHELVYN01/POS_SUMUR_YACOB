@@ -39,7 +39,12 @@ pos-app/
 - Laporan penjualan harian, export ke Excel
 - Manajemen user (multi-kasir)
 - Wajib bisa jalan offline penuh
-- Backup data ke internet (via Supabase) saat online
+
+
+## Fitur tambahan 
+ 
+ - licensi untuk aplikasi 
+
 
 ## Lisensi (fase 21)
 
