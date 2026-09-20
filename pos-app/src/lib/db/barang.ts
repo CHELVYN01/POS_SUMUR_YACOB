@@ -7,17 +7,25 @@ type BarangRow = {
 	id: number;
 	nama: string;
 	harga: number;
+	harga_beli: number | null;
 	qty: number | null;
 	barcode: string | null;
 };
 
 function toBarang(row: BarangRow): Barang {
-	return row;
+	return {
+		id: row.id,
+		nama: row.nama,
+		harga: row.harga,
+		hargaBeli: row.harga_beli,
+		qty: row.qty,
+		barcode: row.barcode
+	};
 }
 
 export async function listBarang(): Promise<Barang[]> {
 	const db = await getDb();
-	const rows = await db.select<BarangRow[]>('SELECT id, nama, harga, qty, barcode FROM barang ORDER BY nama');
+	const rows = await db.select<BarangRow[]>('SELECT id, nama, harga, harga_beli, qty, barcode FROM barang ORDER BY nama');
 	return rows.map(toBarang);
 }
 
@@ -29,7 +37,7 @@ function polaLike(kata: string): string {
 	return '%' + kata.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
 }
 
-const SELECT_BARANG = 'SELECT id, nama, harga, qty, barcode FROM barang';
+const SELECT_BARANG = 'SELECT id, nama, harga, harga_beli, qty, barcode FROM barang';
 const FILTER_CARI = "(nama LIKE $1 ESCAPE '\\' OR barcode LIKE $1 ESCAPE '\\')";
 
 /** Jumlah produk yang cocok — dipakai untuk menghitung banyaknya halaman. */
@@ -78,7 +86,7 @@ export async function listBarangHalaman(
 export async function listBarangTerlaris(limit = 30): Promise<Barang[]> {
 	const db = await getDb();
 	const rows = await db.select<BarangRow[]>(
-		`SELECT b.id, b.nama, b.harga, b.qty, b.barcode
+		`SELECT b.id, b.nama, b.harga, b.harga_beli, b.qty, b.barcode
 		 FROM barang b
 		 LEFT JOIN item_penjualan ip ON ip.barang_id = b.id
 		 GROUP BY b.id
@@ -119,41 +127,74 @@ export async function cariStokHabis(ids: number[]): Promise<number[]> {
 	return rows.map((r) => r.id);
 }
 
+/**
+ * Stok terkini beberapa produk sekaligus, dibaca dari database bukan dari daftar
+ * yang tampil di layar — daftar di Kasir cuma 30 terlaris dan stoknya bisa sudah
+ * berubah lewat keranjang lain atau halaman Produk.
+ *
+ * `null` berarti stok memang tidak dilacak, bukan nol.
+ */
+export async function stokBarang(ids: number[]): Promise<Map<number, number | null>> {
+	if (ids.length === 0) return new Map();
+	const db = await getDb();
+	const params = ids.map((_, i) => `$${i + 1}`).join(', ');
+	const rows = await db.select<{ id: number; qty: number | null }[]>(
+		`SELECT id, qty FROM barang WHERE id IN (${params})`,
+		ids
+	);
+	return new Map(rows.map((r) => [r.id, r.qty]));
+}
+
+/** Produk yang stoknya belum dilacak — tetap boleh dijual walau mode stok ketat. */
+export async function hitungBarangTanpaStok(): Promise<number> {
+	const db = await getDb();
+	const rows = await db.select<{ n: number }[]>(
+		'SELECT COUNT(*) AS n FROM barang WHERE qty IS NULL'
+	);
+	return rows[0]?.n ?? 0;
+}
+
 export async function cariBarangByBarcode(barcode: string): Promise<Barang | null> {
 	const db = await getDb();
 	const rows = await db.select<BarangRow[]>(
-		'SELECT id, nama, harga, qty, barcode FROM barang WHERE barcode = $1',
+		'SELECT id, nama, harga, harga_beli, qty, barcode FROM barang WHERE barcode = $1',
 		[barcode]
 	);
 	return rows[0] ? toBarang(rows[0]) : null;
 }
 
-export async function tambahBarang(input: {
+export type InputBarang = {
 	nama: string;
 	harga: number;
+	hargaBeli: number | null;
 	qty: number | null;
 	barcode: string | null;
-}): Promise<number> {
+};
+
+export async function tambahBarang(input: InputBarang): Promise<number> {
 	const db = await getDb();
 	const result = await db.execute(
-		'INSERT INTO barang (nama, harga, qty, barcode) VALUES ($1, $2, $3, $4)',
-		[input.nama, input.harga, input.qty, input.barcode]
+		'INSERT INTO barang (nama, harga, harga_beli, qty, barcode) VALUES ($1, $2, $3, $4, $5)',
+		[input.nama, input.harga, input.hargaBeli, input.qty, input.barcode]
 	);
 	return result.lastInsertId as number;
 }
 
-export async function updateBarang(
-	id: number,
-	input: { nama: string; harga: number; qty: number | null; barcode: string | null }
-): Promise<void> {
+export async function updateBarang(id: number, input: InputBarang): Promise<void> {
 	const db = await getDb();
-	await db.execute('UPDATE barang SET nama = $1, harga = $2, qty = $3, barcode = $4 WHERE id = $5', [
-		input.nama,
-		input.harga,
-		input.qty,
-		input.barcode,
-		id
-	]);
+	await db.execute(
+		'UPDATE barang SET nama = $1, harga = $2, harga_beli = $3, qty = $4, barcode = $5 WHERE id = $6',
+		[input.nama, input.harga, input.hargaBeli, input.qty, input.barcode, id]
+	);
+}
+
+/** Produk yang harga belinya belum diisi — labanya tidak bisa dihitung. */
+export async function hitungBarangTanpaHargaBeli(): Promise<number> {
+	const db = await getDb();
+	const rows = await db.select<{ n: number }[]>(
+		'SELECT COUNT(*) AS n FROM barang WHERE harga_beli IS NULL'
+	);
+	return rows[0]?.n ?? 0;
 }
 
 export async function hapusBarang(id: number): Promise<void> {
@@ -186,13 +227,21 @@ export type RencanaImport = {
 	/** baris yang isinya persis sama dengan yang di database — tidak perlu ditulis ulang */
 	sama: number;
 	error: ErrorBaris[];
+	/** false = file tanpa kolom Harga Beli; harga beli yang sudah ada tidak disentuh */
+	adaKolomHargaBeli: boolean;
 };
 
-function bedaProduk(sebelum: Barang, baris: BarisProduk): string[] {
+function bedaProduk(sebelum: Barang, baris: BarisProduk, adaKolomHargaBeli: boolean): string[] {
 	const perubahan: string[] = [];
 	if (sebelum.nama !== baris.nama) perubahan.push(`nama: "${sebelum.nama}" → "${baris.nama}"`);
 	if (sebelum.harga !== baris.harga) {
-		perubahan.push(`harga: ${formatRupiah(sebelum.harga)} → ${formatRupiah(baris.harga)}`);
+		perubahan.push(`harga jual: ${formatRupiah(sebelum.harga)} → ${formatRupiah(baris.harga)}`);
+	}
+	// Kolomnya tidak ada di file = tidak ada yang diminta berubah, bukan "dikosongkan".
+	if (adaKolomHargaBeli && sebelum.hargaBeli !== baris.hargaBeli) {
+		const dari = sebelum.hargaBeli === null ? '-' : formatRupiah(sebelum.hargaBeli);
+		const ke = baris.hargaBeli === null ? '-' : formatRupiah(baris.hargaBeli);
+		perubahan.push(`harga beli: ${dari} → ${ke}`);
 	}
 	if (sebelum.qty !== baris.qty) {
 		perubahan.push(`stok: ${sebelum.qty ?? '-'} → ${baris.qty ?? '-'}`);
@@ -217,13 +266,20 @@ function bedaProduk(sebelum: Barang, baris: BarisProduk): string[] {
  */
 export async function siapkanImportBarang(
 	baris: BarisProduk[],
-	errorParse: ErrorBaris[] = []
+	errorParse: ErrorBaris[] = [],
+	adaKolomHargaBeli = true
 ): Promise<RencanaImport> {
 	const semua = await listBarang();
 	const byId = new Map(semua.map((b) => [b.id, b]));
 	const byBarcode = new Map(semua.filter((b) => b.barcode).map((b) => [b.barcode as string, b]));
 
-	const rencana: RencanaImport = { baru: [], ubah: [], sama: 0, error: [...errorParse] };
+	const rencana: RencanaImport = {
+		baru: [],
+		ubah: [],
+		sama: 0,
+		error: [...errorParse],
+		adaKolomHargaBeli
+	};
 
 	for (const b of baris) {
 		const target = (b.id !== null ? byId.get(b.id) : undefined) ?? byBarcode.get(b.barcode);
@@ -245,7 +301,7 @@ export async function siapkanImportBarang(
 			continue;
 		}
 
-		const perubahan = bedaProduk(target, b);
+		const perubahan = bedaProduk(target, b, adaKolomHargaBeli);
 		if (perubahan.length === 0) rencana.sama += 1;
 		else rencana.ubah.push({ baris: b, sebelum: target, perubahan });
 	}
@@ -272,6 +328,8 @@ export async function terapkanImportBarang(rencana: RencanaImport): Promise<Hasi
 			await updateBarang(u.sebelum.id, {
 				nama: u.baris.nama,
 				harga: u.baris.harga,
+				// File tanpa kolom Harga Beli tidak boleh menghapus yang sudah tersimpan.
+				hargaBeli: rencana.adaKolomHargaBeli ? u.baris.hargaBeli : u.sebelum.hargaBeli,
 				qty: u.baris.qty,
 				barcode: u.baris.barcode
 			});
@@ -284,7 +342,13 @@ export async function terapkanImportBarang(rencana: RencanaImport): Promise<Hasi
 
 	for (const b of rencana.baru) {
 		try {
-			await tambahBarang({ nama: b.nama, harga: b.harga, qty: b.qty, barcode: b.barcode });
+			await tambahBarang({
+				nama: b.nama,
+				harga: b.harga,
+				hargaBeli: b.hargaBeli,
+				qty: b.qty,
+				barcode: b.barcode
+			});
 			hasil.baru += 1;
 		} catch (e) {
 			console.error('Gagal menambah produk saat import:', e);

@@ -25,10 +25,29 @@
 		type Periode,
 		type PresetPeriode
 	} from '$lib/utils/periode';
+	import { currentUser } from '$lib/stores/session';
+	import { laporanKasirHariIni } from '$lib/stores/pengaturanLaporan';
 	import type { BarangTerjual, KasBon, Penjualan, Ringkasan, TitikGrafik } from '$lib/types';
 
 	type Tab = 'dashboard' | 'hariIni' | 'keseluruhan' | 'bon';
 	let tab = $state<Tab>('dashboard');
+
+	/**
+	 * Pembatasan "hanya laporan hari ini" (Pengaturan > Laporan). Admin selalu
+	 * bebas; yang dibatasi hanya role kasir.
+	 */
+	let adminAktif = $derived($currentUser?.role === 'admin');
+	let dibatasi = $derived(!adminAktif && $laporanKasirHariIni);
+
+	/**
+	 * Tab yang benar-benar dirender. Pengaturannya dibaca asinkron saat aplikasi
+	 * dibuka, jadi `dibatasi` bisa berubah dari false ke true SETELAH halaman ini
+	 * tampil. Menurunkan tab (bukan menimpanya lewat $effect) memastikan tab
+	 * terlarang tidak sempat dirender maupun menjalankan query-nya sedetik pun.
+	 */
+	let tabAktif = $derived<Tab>(
+		dibatasi && (tab === 'dashboard' || tab === 'keseluruhan') ? 'hariIni' : tab
+	);
 
 	const RINGKASAN_KOSONG: Ringkasan = {
 		totalPenjualan: 0,
@@ -36,8 +55,22 @@
 		rataRata: 0,
 		bonBaru: 0,
 		jumlahBon: 0,
-		bonDibayar: 0
+		bonDibayar: 0,
+		labaKotor: 0,
+		omzetTerhitung: 0,
+		omzetBelumTerhitung: 0,
+		barisBelumTerhitung: 0
 	};
+
+	/**
+	 * Margin = laba dibagi omzet YANG LABANYA BISA DIHITUNG, bukan dibagi seluruh
+	 * omzet. Kalau penyebutnya seluruh omzet, penjualan yang harga belinya kosong
+	 * ikut menekan angka marginnya dan hasilnya salah ke bawah.
+	 */
+	function labelMargin(r: Ringkasan): string | undefined {
+		if (r.omzetTerhitung <= 0) return undefined;
+		return `margin ${Math.round((r.labaKotor / r.omzetTerhitung) * 100)}%`;
+	}
 
 	// --- Dashboard ---
 	let ringkasanHariIni = $state<Ringkasan>(RINGKASAN_KOSONG);
@@ -167,13 +200,13 @@
 	// Data dimuat saat tabnya dibuka, bukan sekaligus di awal — tiap tab punya
 	// query sendiri dan kasir biasanya cuma melihat satu tab.
 	$effect(() => {
-		if (tab === 'dashboard') muatDashboard();
-		else if (tab === 'hariIni') muatHariIni();
-		else if (tab === 'bon') muatBon();
+		if (tabAktif === 'dashboard') muatDashboard();
+		else if (tabAktif === 'hariIni') muatHariIni();
+		else if (tabAktif === 'bon') muatBon();
 	});
 
 	$effect(() => {
-		if (tab !== 'keseluruhan') return;
+		if (tabAktif !== 'keseluruhan') return;
 		muatKeseluruhan(periodeAktif, tampilkanGrafikPeriode);
 	});
 
@@ -184,8 +217,8 @@
 	$effect(() => {
 		const id = setInterval(() => {
 			if (tanggalHariIni() === tanggalAktif) return;
-			if (tab === 'hariIni') muatHariIni();
-			else if (tab === 'dashboard') muatDashboard();
+			if (tabAktif === 'hariIni') muatHariIni();
+			else if (tabAktif === 'dashboard') muatDashboard();
 			else tanggalAktif = tanggalHariIni();
 		}, 60_000);
 		return () => clearInterval(id);
@@ -203,10 +236,16 @@
 			let p: Periode | undefined;
 			let label: string | undefined;
 
-			if (tab === 'hariIni') {
+			if (dibatasi) {
+				// Tanpa ini, ekspor dari tab Kas Bon jatuh ke `p = undefined` — artinya
+				// SELURUH riwayat penjualan ikut terbawa ke file Excel, persis data yang
+				// pembatasan ini maksudkan untuk tidak terlihat.
 				p = hariIni();
 				label = labelPeriode(p);
-			} else if (tab === 'keseluruhan' && preset !== 'semua') {
+			} else if (tabAktif === 'hariIni') {
+				p = hariIni();
+				label = labelPeriode(p);
+			} else if (tabAktif === 'keseluruhan' && preset !== 'semua') {
 				p = periodeAktif;
 				label = labelPeriodeAktif;
 			}
@@ -307,6 +346,21 @@
 	</table>
 {/snippet}
 
+<!--
+	Angka laba TIDAK boleh dibaca sebagai angka final selama masih ada penjualan yang
+	harga belinya kosong. Barang tanpa harga beli sengaja tidak dihitung (bukan dianggap
+	untung penuh), jadi laba yang tampil selalu lebih kecil dari yang sebenarnya —
+	dan pemilik toko harus tahu itu, bukan menebaknya.
+-->
+{#snippet peringatanLaba(r: Ringkasan)}
+	{#if r.omzetBelumTerhitung > 0}
+		<p class="peringatan-laba">
+			{formatRupiah(r.omzetBelumTerhitung)} penjualan belum dihitung labanya karena harga belinya
+			kosong. Isi Harga Beli di halaman Produk supaya angka labanya lengkap.
+		</p>
+	{/if}
+{/snippet}
+
 {#snippet kartu(label: string, nilai: string, sub?: string)}
 	<div class="kartu card">
 		<div class="kartu-label">{label}</div>
@@ -328,25 +382,33 @@
 	{/if}
 
 	<div class="tabs">
-		<button class="tab-btn" class:active={tab === 'dashboard'} onclick={() => (tab = 'dashboard')}>
-			Dashboard
-		</button>
-		<button class="tab-btn" class:active={tab === 'hariIni'} onclick={() => (tab = 'hariIni')}>
+		{#if !dibatasi}
+			<button
+				class="tab-btn"
+				class:active={tabAktif === 'dashboard'}
+				onclick={() => (tab = 'dashboard')}
+			>
+				Dashboard
+			</button>
+		{/if}
+		<button class="tab-btn" class:active={tabAktif === 'hariIni'} onclick={() => (tab = 'hariIni')}>
 			Hari Ini
 		</button>
-		<button
-			class="tab-btn"
-			class:active={tab === 'keseluruhan'}
-			onclick={() => (tab = 'keseluruhan')}
-		>
-			Keseluruhan
-		</button>
-		<button class="tab-btn" class:active={tab === 'bon'} onclick={() => (tab = 'bon')}>
+		{#if !dibatasi}
+			<button
+				class="tab-btn"
+				class:active={tabAktif === 'keseluruhan'}
+				onclick={() => (tab = 'keseluruhan')}
+			>
+				Keseluruhan
+			</button>
+		{/if}
+		<button class="tab-btn" class:active={tabAktif === 'bon'} onclick={() => (tab = 'bon')}>
 			Kas Bon
 		</button>
 	</div>
 
-	{#if tab === 'dashboard'}
+	{#if tabAktif === 'dashboard'}
 		<div class="kartu-grid">
 			{@render kartu(
 				'Hari Ini',
@@ -357,6 +419,11 @@
 				'Bulan Ini',
 				formatRupiah(ringkasanBulan.totalPenjualan),
 				`${ringkasanBulan.jumlahTransaksi} transaksi`
+			)}
+			{@render kartu(
+				'Laba Bulan Ini',
+				formatRupiah(ringkasanBulan.labaKotor),
+				labelMargin(ringkasanBulan)
 			)}
 			{@render kartu(
 				'Keseluruhan',
@@ -397,7 +464,7 @@
 		{/if}
 	{/if}
 
-	{#if tab === 'hariIni'}
+	{#if tabAktif === 'hariIni'}
 		<div class="hero card">
 			<div class="hero-label">Penjualan Hari Ini · {formatTanggalLokal(tanggalAktif)}</div>
 			<div class="hero-nilai">{formatRupiah(ringkasanHari.totalPenjualan)}</div>
@@ -406,7 +473,15 @@
 			</div>
 		</div>
 
+		<!-- Laba hanya untuk admin — kasir tidak perlu tahu margin toko. -->
 		<div class="kartu-grid">
+			{#if adminAktif}
+				{@render kartu(
+					'Laba Hari Ini',
+					formatRupiah(ringkasanHari.labaKotor),
+					labelMargin(ringkasanHari)
+				)}
+			{/if}
 			{@render kartu(
 				'Bon Baru',
 				formatRupiah(ringkasanHari.bonBaru),
@@ -420,6 +495,10 @@
 			)}
 		</div>
 
+		{#if adminAktif}
+			{@render peringatanLaba(ringkasanHari)}
+		{/if}
+
 		<div class="card panel">
 			<h3 class="section-title">Penjualan per Jam</h3>
 			<BarChart data={grafikJam} formatNilai={formatRupiah} />
@@ -429,7 +508,7 @@
 		{@render tabelPenjualan(penjualanHari, memuatHari)}
 	{/if}
 
-	{#if tab === 'keseluruhan'}
+	{#if tabAktif === 'keseluruhan'}
 		<div class="filter">
 			{#each PRESET as p (p.nilai)}
 				<button
@@ -463,11 +542,18 @@
 			)}
 			{@render kartu('Rata-rata per Transaksi', formatRupiah(ringkasanPeriodeAktif.rataRata))}
 			{@render kartu(
+				'Laba Kotor',
+				formatRupiah(ringkasanPeriodeAktif.labaKotor),
+				labelMargin(ringkasanPeriodeAktif)
+			)}
+			{@render kartu(
 				'Bon Baru',
 				formatRupiah(ringkasanPeriodeAktif.bonBaru),
 				`${ringkasanPeriodeAktif.jumlahBon} bon`
 			)}
 		</div>
+
+		{@render peringatanLaba(ringkasanPeriodeAktif)}
 
 		{#if tampilkanGrafikPeriode}
 			<div class="card panel">
@@ -480,7 +566,7 @@
 		{@render tabelPenjualan(penjualanPeriode, memuatPeriode)}
 	{/if}
 
-	{#if tab === 'bon'}
+	{#if tabAktif === 'bon'}
 		<div class="summary card">
 			<div>
 				<div class="summary-label">Total Bon</div>
@@ -618,6 +704,17 @@
 
 	.kartu {
 		padding: 0.9rem 1.1rem;
+	}
+
+	.peringatan-laba {
+		margin: 0 0 1rem 0;
+		padding: 0.7rem 0.85rem;
+		border: 1px solid var(--border);
+		border-left: 3px solid var(--warning, #b54708);
+		border-radius: 6px;
+		font-size: 0.85rem;
+		line-height: 1.5;
+		color: var(--text-muted);
 	}
 
 	.kartu-label {

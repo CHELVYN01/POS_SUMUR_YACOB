@@ -30,6 +30,24 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0004_log_aktivitas.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 5,
+            description: "harga_beli",
+            sql: include_str!("../migrations/0005_harga_beli.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 6,
+            description: "pengaturan",
+            sql: include_str!("../migrations/0006_pengaturan.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 7,
+            description: "hak_akses_laporan",
+            sql: include_str!("../migrations/0007_hak_akses_laporan.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

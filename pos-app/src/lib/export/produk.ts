@@ -20,8 +20,15 @@ const BORDER_TIPIS: Partial<ExcelJS.Borders> = {
  * (bukan urutannya) supaya kolom yang digeser/disisipi user tidak merusak import.
  */
 const NAMA_SHEET = 'Produk';
-const HEADER = ['ID', 'Barcode', 'Nama Produk', 'Harga', 'Stok'] as const;
-const LEBAR = [{ width: 8 }, { width: 20 }, { width: 32 }, { width: 14 }, { width: 10 }];
+const HEADER = ['ID', 'Barcode', 'Nama Produk', 'Harga Beli', 'Harga Jual', 'Stok'] as const;
+const LEBAR = [
+	{ width: 8 },
+	{ width: 20 },
+	{ width: 32 },
+	{ width: 14 },
+	{ width: 14 },
+	{ width: 10 }
+];
 const BARIS_HEADER = 4;
 
 function formatTanggalFile() {
@@ -53,8 +60,9 @@ export async function exportProdukExcel(produk: Barang[]): Promise<boolean> {
 	ws.mergeCells(3, 1, 3, HEADER.length);
 	const petunjuk = ws.getCell(3, 1);
 	petunjuk.value =
-		'Silakan edit Barcode / Nama / Harga / Stok, lalu import kembali lewat menu Produk. ' +
+		'Silakan edit Barcode / Nama / Harga Beli / Harga Jual / Stok, lalu import kembali lewat menu Produk. ' +
 		'Kolom ID jangan diubah. Baris baru boleh ditambah di bawah (ID dikosongkan). ' +
+		'Harga Beli boleh dikosongkan, tapi produk tanpa harga beli tidak ikut dihitung labanya. ' +
 		'Baris yang dihapus di sini TIDAK menghapus produk di aplikasi.';
 	petunjuk.font = { size: 9, color: { argb: 'FF767671' } };
 	petunjuk.alignment = { vertical: 'middle', wrapText: false };
@@ -76,10 +84,13 @@ export async function exportProdukExcel(produk: Barang[]): Promise<boolean> {
 		row.getCell(1).value = b.id;
 		row.getCell(2).value = b.barcode ?? '';
 		row.getCell(3).value = b.nama;
-		row.getCell(4).value = b.harga;
+		// harga beli belum diisi ditulis kosong, bukan 0 — 0 berarti barangnya gratis
+		row.getCell(4).value = b.hargaBeli === null ? '' : b.hargaBeli;
 		row.getCell(4).numFmt = RUPIAH_FMT;
+		row.getCell(5).value = b.harga;
+		row.getCell(5).numFmt = RUPIAH_FMT;
 		// stok tak dilacak ditulis kosong, bukan 0 — 0 berarti "habis", beda artinya
-		row.getCell(5).value = b.qty === null ? '' : b.qty;
+		row.getCell(6).value = b.qty === null ? '' : b.qty;
 
 		for (let c = 1; c <= HEADER.length; c++) {
 			row.getCell(c).border = BORDER_TIPIS;
@@ -115,6 +126,8 @@ export type BarisProduk = {
 	barcode: string;
 	nama: string;
 	harga: number;
+	/** `null` = kolomnya dikosongkan; labanya tidak dihitung, tidak dianggap 0. */
+	hargaBeli: number | null;
 	qty: number | null;
 };
 
@@ -124,6 +137,15 @@ export type HasilBaca = {
 	namaFile: string;
 	baris: BarisProduk[];
 	error: ErrorBaris[];
+	/**
+	 * Apakah file punya kolom Harga Beli sama sekali.
+	 *
+	 * File hasil export versi sebelum fitur laba tidak punya kolom itu, dan tanpa
+	 * penanda ini seluruh barisnya terbaca "harga beli kosong" lalu menghapus harga
+	 * beli yang sudah susah payah diisi. Kalau false, harga beli tidak disentuh
+	 * sama sekali saat import.
+	 */
+	adaKolomHargaBeli: boolean;
 };
 
 /** Isi sel Excel bisa berupa rich text, rumus, atau hyperlink — semuanya diratakan jadi teks. */
@@ -177,7 +199,10 @@ const ALIAS: Record<keyof Omit<BarisProduk, 'baris'>, string[]> = {
 	id: ['id'],
 	barcode: ['barcode', 'kodebarang', 'kode'],
 	nama: ['namaproduk', 'nama', 'namabarang', 'produk', 'barang'],
-	harga: ['harga', 'hargajual', 'hargarp'],
+	harga: ['hargajual', 'harga', 'hargarp', 'jual'],
+	// "modal" & "kulakan" ikut dikenali — itu istilah yang lebih sering dipakai
+	// pemilik warung daripada "harga beli"
+	hargaBeli: ['hargabeli', 'hargamodal', 'modal', 'kulakan', 'hargakulakan', 'beli'],
 	qty: ['stok', 'qty', 'stokqty', 'jumlah', 'stock']
 };
 
@@ -191,7 +216,14 @@ function cariHeader(ws: ExcelJS.Worksheet): { row: number; kolom: PetaKolom } | 
 	const batas = Math.min(ws.rowCount, 20);
 	for (let r = 1; r <= batas; r++) {
 		const row = ws.getRow(r);
-		const kolom: PetaKolom = { id: null, barcode: null, nama: null, harga: null, qty: null };
+		const kolom: PetaKolom = {
+			id: null,
+			barcode: null,
+			nama: null,
+			harga: null,
+			hargaBeli: null,
+			qty: null
+		};
 
 		for (let c = 1; c <= Math.max(row.cellCount, 1); c++) {
 			const judul = normalJudul(teksSel(row.getCell(c)));
@@ -201,7 +233,8 @@ function cariHeader(ws: ExcelJS.Worksheet): { row: number; kolom: PetaKolom } | 
 			}
 		}
 
-		// nama & harga adalah dua kolom yang tidak boleh hilang; ID dan Stok boleh tidak ada
+		// nama & harga jual tidak boleh hilang; ID, Harga Beli, dan Stok boleh tidak ada
+		// — file hasil export versi lama tidak punya kolom Harga Beli sama sekali
 		if (kolom.nama !== null && kolom.harga !== null && kolom.barcode !== null) {
 			return { row: r, kolom };
 		}
@@ -256,10 +289,20 @@ export async function bacaProdukExcel(): Promise<HasilBaca | null> {
 		const nama = kolom.nama === null ? '' : teksSel(row.getCell(kolom.nama));
 		const hargaSel = kolom.harga === null ? null : angkaSel(row.getCell(kolom.harga));
 		const qtySel = kolom.qty === null ? null : angkaSel(row.getCell(kolom.qty));
+		const hargaBeliSel = kolom.hargaBeli === null ? null : angkaSel(row.getCell(kolom.hargaBeli));
 		const idSel = kolom.id === null ? null : angkaSel(row.getCell(kolom.id));
 
 		// baris kosong di tengah/akhir tabel itu wajar, bukan kesalahan
-		if (!barcode && !nama && hargaSel === null && qtySel === null && idSel === null) continue;
+		if (
+			!barcode &&
+			!nama &&
+			hargaSel === null &&
+			qtySel === null &&
+			idSel === null &&
+			hargaBeliSel === null
+		) {
+			continue;
+		}
 
 		const pesan: string[] = [];
 
@@ -272,6 +315,9 @@ export async function bacaProdukExcel(): Promise<HasilBaca | null> {
 
 		if (qtySel !== null && !Number.isFinite(qtySel)) pesan.push('stok bukan angka');
 		else if (qtySel !== null && qtySel < 0) pesan.push('stok tidak boleh minus');
+
+		if (hargaBeliSel !== null && !Number.isFinite(hargaBeliSel)) pesan.push('harga beli bukan angka');
+		else if (hargaBeliSel !== null && hargaBeliSel < 0) pesan.push('harga beli tidak boleh minus');
 
 		let id: number | null = null;
 		if (idSel !== null) {
@@ -297,10 +343,11 @@ export async function bacaProdukExcel(): Promise<HasilBaca | null> {
 			nama,
 			// harga & stok disimpan INTEGER di database; pecahan dibulatkan, bukan ditolak
 			harga: Math.round(hargaSel as number),
+			hargaBeli: hargaBeliSel === null ? null : Math.round(hargaBeliSel),
 			qty: qtySel === null ? null : Math.round(qtySel)
 		});
 	}
 
 	const namaFile = path.split(/[\\/]/).pop() ?? path;
-	return { namaFile, baris, error };
+	return { namaFile, baris, error, adaKolomHargaBeli: kolom.hargaBeli !== null };
 }

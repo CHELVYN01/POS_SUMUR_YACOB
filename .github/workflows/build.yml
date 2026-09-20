@@ -21,18 +21,105 @@ on:
         default: semua
         options: [semua, windows, linux]
   push:
+    branches:
+      - master # merge ke master → draft Release otomatis kalau versinya baru
     tags:
-      - "v*" # mis. v0.1.8 → sekalian bikin GitHub Release
+      - "v*" # mis. v0.2.0 → dipakai kalau mau menandai rilis manual
 
 # Diperlukan agar job release bisa membuat entri di halaman Releases.
 permissions:
   contents: write
 
 jobs:
+  # ------------------------------------------------------------------ Versi --
+  # Membaca versi dari tauri.conf.json (satu-satunya angka yang menentukan versi
+  # installer) dan memutuskan apakah run ini layak jadi Release.
+  #
+  # Ada supaya nomor rilis tidak perlu diketik dua kali. Sebelumnya nama tag dan
+  # versi di berkas tidak saling terhubung sama sekali: tag v0.3.0 dengan berkas
+  # yang masih 0.2.0 akan menghasilkan halaman Release bertuliskan v0.3.0 berisi
+  # installer 0.2.0, dan tidak ada yang mencegahnya.
+  versi:
+    runs-on: ubuntu-latest
+    outputs:
+      versi: ${{ steps.baca.outputs.versi }}
+      tag: ${{ steps.baca.outputs.tag }}
+      rilis: ${{ steps.baca.outputs.rilis }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # butuh seluruh tag untuk tahu versi ini sudah pernah dirilis
+
+      - name: Baca versi & tentukan perlu rilis
+        id: baca
+        run: |
+          versi=$(node -p "require('./pos-app/src-tauri/tauri.conf.json').version")
+          echo "versi=$versi" >> "$GITHUB_OUTPUT"
+          echo "Versi di tauri.conf.json: $versi"
+
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            # Dipicu tag manual: tag yang menentukan, tapi wajib cocok dengan berkas.
+            tag="${{ github.ref_name }}"
+            if [ "$tag" != "v$versi" ]; then
+              echo "::error::Tag $tag tidak cocok dengan versi di tauri.conf.json ($versi)."
+              echo "::error::Naikkan versinya di lima tempat, atau buat tag v$versi."
+              exit 1
+            fi
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "rilis=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          tag="v$versi"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" != "push" ]; then
+            # Run manual: installer saja, tanpa Release. Tombol itu dipakai untuk
+            # mencoba build, bukan untuk merilis.
+            echo "rilis=false" >> "$GITHUB_OUTPUT"
+            echo "Run manual — artifact saja, tidak membuat Release."
+          elif git rev-parse "refs/tags/$tag" >/dev/null 2>&1; then
+            # Versi ini sudah pernah dirilis. Tanpa penjagaan ini, tiap push ke
+            # master akan menimpa draft (atau release) yang sudah ada.
+            echo "rilis=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Tag $tag sudah ada — versinya belum dinaikkan, Release dilewati."
+          else
+            echo "rilis=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Versi baru $versi — draft Release akan dibuat sebagai $tag."
+          fi
+
+      # Draft Release dibuat DI SINI, sebelum build, lalu tiap job build mengunggah
+      # installernya langsung ke draft ini. Dulu installer dititipkan ke artifact
+      # storage dan dikumpulkan job `release` di akhir — tapi kuota storage Actions
+      # cuma 500 MB, satu run ~350 MB, dan begitu penuh upload gagal dengan
+      # "Artifact storage quota has been hit" (kuotanya baru dihitung ulang 6-12 jam
+      # setelah dibersihkan). Aset Release tidak masuk kuota itu.
+      #
+      # Dibuat sekali di sini, bukan oleh masing-masing job build, supaya dua job
+      # yang selesai berbarengan tidak menghasilkan dua draft dengan tag yang sama.
+      # Kalau draft-nya sudah ada (re-run), dipakai lagi — upload memakai --clobber.
+      - name: Siapkan draft Release
+        if: steps.baca.outputs.rilis == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.baca.outputs.tag }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag sudah ada — installer akan ditimpa ke situ."
+          else
+            gh release create "$tag" --draft --title "$tag" --generate-notes \
+              --target "$GITHUB_SHA"
+            echo "Draft Release $tag dibuat."
+          fi
+
   # ---------------------------------------------------------------- Windows --
   windows:
     # Saat dipicu tag, `inputs.platform` kosong — jadi job ini tetap jalan.
     if: inputs.platform != 'linux'
+    # Menunggu job versi supaya tag yang tidak cocok dengan tauri.conf.json
+    # menggagalkan run lebih dulu, sebelum menghabiskan ~20 menit membangun.
+    needs: versi
     runs-on: windows-latest
 
     defaults:
@@ -93,11 +180,29 @@ jobs:
       - name: Build installer Windows
         run: npm run tauri -- build --bundles nsis,msi
 
+      # Rilis: langsung ke draft Release yang disiapkan job `versi` — tidak lewat
+      # artifact storage (lihat catatan di sana). Git Bash ada di runner Windows,
+      # dipakai supaya glob-nya sama persis dengan job Linux.
+      - name: Unggah installer ke draft Release
+        if: needs.versi.outputs.rilis == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.versi.outputs.tag }}" --clobber \
+            src-tauri/target/release/bundle/nsis/*.exe \
+            src-tauri/target/release/bundle/msi/*.msi
+
+      # Run manual (tombol Run workflow) tidak membuat Release, jadi artifact adalah
+      # satu-satunya jalan mengambil hasilnya. Retensi pendek: ~250 MB per run
+      # (WebView2 offline ikut di-embed) cepat memenuhi kuota 500 MB.
       - name: Upload installer sebagai artifact
+        if: needs.versi.outputs.rilis != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: pos-sumur-yacob-windows
           if-no-files-found: error
+          retention-days: 1
           path: |
             pos-app/src-tauri/target/release/bundle/nsis/*.exe
             pos-app/src-tauri/target/release/bundle/msi/*.msi
@@ -105,6 +210,7 @@ jobs:
   # ------------------------------------------------------------------ Linux --
   linux:
     if: inputs.platform != 'windows'
+    needs: versi
 
     # SENGAJA 22.04, bukan ubuntu-latest. Paket .deb terikat pada versi glibc
     # mesin yang membangunnya: dibangun di 24.04 → hanya jalan di Mint 22 ke
@@ -175,34 +281,22 @@ jobs:
       - name: Build installer Linux
         run: npm run tauri -- build --bundles deb,appimage
 
+      - name: Unggah installer ke draft Release
+        if: needs.versi.outputs.rilis == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.versi.outputs.tag }}" --clobber \
+            src-tauri/target/release/bundle/deb/*.deb \
+            src-tauri/target/release/bundle/appimage/*.AppImage
+
       - name: Upload installer sebagai artifact
+        if: needs.versi.outputs.rilis != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: pos-sumur-yacob-linux
           if-no-files-found: error
+          retention-days: 1 # lihat catatan di job windows
           path: |
             pos-app/src-tauri/target/release/bundle/deb/*.deb
             pos-app/src-tauri/target/release/bundle/appimage/*.AppImage
-
-  # ---------------------------------------------------------------- Release --
-  # Dipisah dari job build supaya hanya ADA SATU yang menyentuh halaman
-  # Releases. Kalau tiap job build bikin release-nya sendiri, dua job yang
-  # selesai berbarengan bisa menghasilkan dua draft dengan tag yang sama.
-  release:
-    # Hanya jalan kalau dipicu oleh tag v* — bukan saat "Run workflow" manual.
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Ambil semua installer
-        uses: actions/download-artifact@v4
-        with:
-          path: installer
-
-      - name: Buat GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true # dicek dulu sebelum dipublikasikan
-          generate_release_notes: true
-          files: installer/**/*

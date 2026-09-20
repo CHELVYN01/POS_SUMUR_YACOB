@@ -96,9 +96,12 @@ const HEADER_PENJUALAN = [
 	'Kasir',
 	'Barang',
 	'Jumlah',
-	'Harga Satuan',
+	'Harga Beli',
+	'Harga Jual',
 	'Subtotal',
-	'Total Transaksi'
+	'Laba',
+	'Total Transaksi',
+	'Laba Transaksi'
 ];
 
 const LEBAR_PENJUALAN = [
@@ -106,10 +109,22 @@ const LEBAR_PENJUALAN = [
 	{ width: 14 },
 	{ width: 26 },
 	{ width: 9 },
+	{ width: 14 },
+	{ width: 14 },
 	{ width: 15 },
-	{ width: 15 },
-	{ width: 17 }
+	{ width: 14 },
+	{ width: 17 },
+	{ width: 16 }
 ];
+
+/** Kolom yang di-merge sepanjang satu transaksi: Waktu, Kasir, Total, Laba Transaksi. */
+const KOLOM_MERGE = [1, 2, 9, 10];
+
+/**
+ * Harga beli yang belum diisi ditulis "-", bukan 0 dan bukan kosong.
+ * 0 akan terbaca sebagai untung penuh, kosong terbaca seperti tidak ada transaksinya.
+ */
+const TAK_DIKETAHUI = '-';
 
 /** Tabel transaksi (satu baris per item, kolom transaksi di-merge) untuk dua sheet. */
 function tulisTabelPenjualan(
@@ -136,32 +151,62 @@ function tulisTabelPenjualan(
 		const baseRow = r;
 		const items = p.items.length > 0 ? p.items : [{ nama: '-', harga: 0, jumlah: 0, barangId: 0 }];
 
+		// Laba transaksi hanya menjumlah item yang harga belinya tercatat. Kalau ada
+		// item yang belum, angkanya ditandai "±" supaya tidak dibaca sebagai laba penuh.
+		let labaTransaksi = 0;
+		let adaYangBelum = false;
+
 		items.forEach((item, i) => {
 			const row = ws.getRow(r);
+			const hargaBeli = item.hargaBeli ?? null;
+			const subtotal = item.harga && item.jumlah ? item.harga * item.jumlah : 0;
+			const laba = hargaBeli === null ? null : (item.harga - hargaBeli) * item.jumlah;
+
+			if (laba === null) adaYangBelum = true;
+			else labaTransaksi += laba;
+
 			// Tanggal diformat dulu: kolom di DB berisi UTC, kalau ditulis mentah
 			// jam & tanggalnya meleset sebesar offset zona.
 			row.getCell(1).value = i === 0 ? formatTanggalJam(p.tanggal) : '';
 			row.getCell(2).value = i === 0 ? p.kasir : '';
 			row.getCell(3).value = item.nama;
 			row.getCell(4).value = item.jumlah || '';
-			row.getCell(5).value = item.harga || '';
-			row.getCell(5).numFmt = RUPIAH_FMT;
-			row.getCell(6).value = item.harga && item.jumlah ? item.harga * item.jumlah : '';
+
+			row.getCell(5).value = hargaBeli === null ? TAK_DIKETAHUI : hargaBeli;
+			if (hargaBeli === null) row.getCell(5).font = { italic: true, color: { argb: 'FF767671' } };
+			else row.getCell(5).numFmt = RUPIAH_FMT;
+
+			row.getCell(6).value = item.harga || '';
 			row.getCell(6).numFmt = RUPIAH_FMT;
-			row.getCell(7).value = i === 0 ? p.total : '';
+			row.getCell(7).value = subtotal || '';
 			row.getCell(7).numFmt = RUPIAH_FMT;
-			row.getCell(7).font = { bold: true };
+
+			row.getCell(8).value = laba === null ? TAK_DIKETAHUI : laba;
+			if (laba === null) row.getCell(8).font = { italic: true, color: { argb: 'FF767671' } };
+			else row.getCell(8).numFmt = RUPIAH_FMT;
+
+			row.getCell(9).value = i === 0 ? p.total : '';
+			row.getCell(9).numFmt = RUPIAH_FMT;
+			row.getCell(9).font = { bold: true };
 			styleBarisData(ws, r, header.length, zebra);
 			r++;
 		});
 
+		// Tetap angka, bukan teks "± Rp3.000": kolom ini harus bisa di-SUM di Excel.
+		// Ketidaklengkapannya ditandai lewat gaya huruf — miring & abu berarti masih
+		// ada item di transaksi ini yang harga belinya belum diisi.
+		const selLaba = ws.getCell(baseRow, 10);
+		selLaba.value = labaTransaksi;
+		selLaba.numFmt = RUPIAH_FMT;
+		selLaba.font = adaYangBelum
+			? { bold: true, italic: true, color: { argb: 'FF767671' } }
+			: { bold: true };
+
 		if (items.length > 1) {
-			ws.mergeCells(baseRow, 1, r - 1, 1);
-			ws.mergeCells(baseRow, 2, r - 1, 2);
-			ws.mergeCells(baseRow, 7, r - 1, 7);
-			ws.getCell(baseRow, 1).alignment = { vertical: 'top' };
-			ws.getCell(baseRow, 2).alignment = { vertical: 'top' };
-			ws.getCell(baseRow, 7).alignment = { vertical: 'top' };
+			for (const c of KOLOM_MERGE) {
+				ws.mergeCells(baseRow, c, r - 1, c);
+				ws.getCell(baseRow, c).alignment = { vertical: 'top' };
+			}
 		}
 		zebra = !zebra;
 	}
@@ -182,6 +227,7 @@ function buatSheetDashboard(
 	judulSheet(ws, 'Laporan Kios Sumur Yacob', 2, periode);
 
 	const totalPenjualan = penjualan.reduce((sum, p) => sum + p.total, 0);
+	const laba = hitungLaba(penjualan);
 	const totalBon = kasbon.reduce((sum, k) => sum + k.total, 0);
 	const bonAktif = kasbon.filter((k) => k.status === 'belum_lunas');
 	const bonLunas = kasbon.filter((k) => k.status === 'lunas');
@@ -189,7 +235,17 @@ function buatSheetDashboard(
 
 	tambahBagian(ws, 'Ringkasan Penjualan', [
 		{ label: 'Total Transaksi', nilai: penjualan.length },
-		{ label: 'Total Penjualan', nilai: totalPenjualan, rupiah: true }
+		{ label: 'Total Penjualan', nilai: totalPenjualan, rupiah: true },
+		{ label: 'Laba Kotor', nilai: laba.labaKotor, rupiah: true },
+		...(laba.omzetBelumTerhitung > 0
+			? [
+					{
+						label: 'Belum dihitung labanya',
+						nilai: laba.omzetBelumTerhitung,
+						rupiah: true
+					}
+				]
+			: [])
 	]);
 
 	tambahBagian(ws, 'Ringkasan Kas Bon', [
@@ -201,6 +257,33 @@ function buatSheetDashboard(
 	]);
 }
 
+/**
+ * Laba kotor dari baris transaksi yang harga belinya tercatat.
+ *
+ * Baris tanpa harga beli sengaja dilewati, bukan dianggap bermodal 0 — kalau
+ * dianggap 0, seluruh harga jualnya terhitung untung dan angka di Excel ini akan
+ * dipakai orang untuk mengambil keputusan yang salah.
+ */
+function hitungLaba(penjualan: Penjualan[]): {
+	labaKotor: number;
+	omzetBelumTerhitung: number;
+} {
+	let labaKotor = 0;
+	let omzetBelumTerhitung = 0;
+
+	for (const p of penjualan) {
+		for (const i of p.items) {
+			if (i.hargaBeli === null || i.hargaBeli === undefined) {
+				omzetBelumTerhitung += i.harga * i.jumlah;
+			} else {
+				labaKotor += (i.harga - i.hargaBeli) * i.jumlah;
+			}
+		}
+	}
+
+	return { labaKotor, omzetBelumTerhitung };
+}
+
 function buatSheetPenjualan(wb: ExcelJS.Workbook, penjualan: Penjualan[], periode?: string) {
 	const ws = wb.addWorksheet('Penjualan');
 	ws.columns = [...LEBAR_PENJUALAN];
@@ -210,9 +293,9 @@ function buatSheetPenjualan(wb: ExcelJS.Workbook, penjualan: Penjualan[], period
 }
 
 /**
- * Sheet khusus hari ini, sengaja ditaruh paling depan supaya jadi sheet yang
- * terbuka pertama kali — angka harian yang paling sering dilihat.
- * Isinya selalu data hari ini, tidak ikut filter tab/rentang yang sedang aktif.
+ * Sheet khusus hari ini. Isinya selalu data hari ini, tidak ikut filter tab/rentang
+ * yang sedang aktif — jadi angka harian tetap ada berapa pun periode yang dipilih
+ * saat export.
  */
 function buatSheetHariIni(
 	wb: ExcelJS.Workbook,
@@ -227,7 +310,11 @@ function buatSheetHariIni(
 	tambahBagian(ws, 'Ringkasan Hari Ini', [
 		{ label: 'Total Penjualan', nilai: r.totalPenjualan, rupiah: true },
 		{ label: 'Jumlah Transaksi', nilai: r.jumlahTransaksi },
-		{ label: 'Rata-rata per Transaksi', nilai: r.rataRata, rupiah: true }
+		{ label: 'Rata-rata per Transaksi', nilai: r.rataRata, rupiah: true },
+		{ label: 'Laba Kotor', nilai: r.labaKotor, rupiah: true },
+		...(r.omzetBelumTerhitung > 0
+			? [{ label: 'Belum dihitung labanya', nilai: r.omzetBelumTerhitung, rupiah: true }]
+			: [])
 	]);
 
 	tambahBagian(ws, 'Kas Bon Hari Ini', [
@@ -353,8 +440,10 @@ export async function exportLaporanExcel(
 	wb.creator = 'POS Kios Sumur Yacob';
 	wb.created = new Date();
 
-	if (opts?.hariIni) buatSheetHariIni(wb, opts.hariIni);
+	// Urutan sheet = urutan tab di halaman Laporan: Dashboard dulu (gambaran besar),
+	// baru Hari Ini, lalu rinciannya.
 	buatSheetDashboard(wb, penjualan, kasbon, opts?.periode);
+	if (opts?.hariIni) buatSheetHariIni(wb, opts.hariIni);
 	buatSheetPenjualan(wb, penjualan, opts?.periode);
 	buatSheetBon(wb, kasbon, opts?.periode);
 

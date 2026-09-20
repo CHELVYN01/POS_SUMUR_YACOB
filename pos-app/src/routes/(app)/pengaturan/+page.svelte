@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { listUsers, tambahUser, hapusUser, usernameTersedia } from '$lib/db/users';
+	import { listUsers, tambahUser, ubahUser, hapusUser, usernameTersedia } from '$lib/db/users';
 	import { currentUser } from '$lib/stores/session';
 	import { tokoInfo } from '$lib/stores/toko';
 	import { setMasterPassword, getAutoBackupDir, setAutoBackupDir } from '$lib/db-manager';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { BUILD_DATE, BUILD_COMMIT, APP_VERSION, APP_AUTHOR } from '$lib/buildInfo';
+	import { stokLonggar, ubahStokLonggar } from '$lib/stores/pengaturanStok';
+	import { laporanKasirHariIni, ubahLaporanKasirHariIni } from '$lib/stores/pengaturanLaporan';
+	import { hitungBarangTanpaStok } from '$lib/db/barang';
+	import { toast } from '$lib/stores/toast';
 	import { hapusLisensi, labelPerangkat, labelTier } from '$lib/lisensi';
 	import { lisensi, segarkanLisensi } from '$lib/stores/lisensi';
 	import type { User } from '$lib/types';
@@ -14,6 +18,8 @@
 	let loading = $state(true);
 
 	let dialogEl = $state<HTMLDialogElement | null>(null);
+	/** null = dialog dipakai untuk Tambah; ada isinya = Edit user dengan id ini. */
+	let editId = $state<number | null>(null);
 	let nama = $state('');
 	let username = $state('');
 	let password = $state('');
@@ -23,6 +29,56 @@
 	let listError = $state('');
 
 	let isAdmin = $derived($currentUser?.role === 'admin');
+
+	let produkTanpaStok = $state(0);
+	let menyimpanStok = $state(false);
+
+	async function gantiModeStok(longgar: boolean, target: HTMLInputElement) {
+		// Mematikan centang ini bisa menghentikan penjualan banyak produk sekaligus.
+		// Kalau ada produk yang stoknya belum diisi, admin harus menyadarinya dulu —
+		// bukan baru tahu saat kasir tidak bisa melayani pembeli.
+		if (!longgar && produkTanpaStok > 0) {
+			const lanjut = confirm(
+				`${produkTanpaStok} produk stoknya belum diisi.\n\n` +
+					'Kalau mode stok ketat dinyalakan, produk itu TIDAK BISA DIJUAL sampai stoknya diisi ' +
+					'di halaman Produk.\n\nLanjutkan?'
+			);
+			if (!lanjut) {
+				target.checked = true;
+				return;
+			}
+		}
+
+		menyimpanStok = true;
+		try {
+			await ubahStokLonggar(longgar);
+			produkTanpaStok = await hitungBarangTanpaStok();
+			toast.sukses(longgar ? 'Mode stok longgar aktif' : 'Mode stok ketat aktif');
+		} catch (e) {
+			console.error('Gagal menyimpan pengaturan stok:', e);
+			toast.error('Gagal menyimpan pengaturan stok');
+		} finally {
+			menyimpanStok = false;
+		}
+	}
+
+	let menyimpanLaporan = $state(false);
+
+	async function gantiHakAksesLaporan(batasi: boolean, target: HTMLInputElement) {
+		menyimpanLaporan = true;
+		try {
+			await ubahLaporanKasirHariIni(batasi);
+			toast.sukses(
+				batasi ? 'Kasir dibatasi ke laporan hari ini' : 'Kasir bisa melihat semua laporan'
+			);
+		} catch (e) {
+			console.error('Gagal menyimpan hak akses laporan:', e);
+			toast.error('Gagal menyimpan hak akses laporan');
+			target.checked = !batasi;
+		} finally {
+			menyimpanLaporan = false;
+		}
+	}
 
 	let lepasPassword = $state('');
 	let lepasError = $state('');
@@ -46,8 +102,17 @@
 		}
 	}
 
-	type Tab = 'umum' | 'user' | 'sinkronisasi' | 'keamanan';
+	type Tab = 'umum' | 'produk' | 'laporan' | 'user' | 'sinkronisasi' | 'keamanan';
 	let tab = $state<Tab>('umum');
+
+	/**
+	 * Non-admin cuma punya tab Umum. Penjaganya di sini, bukan sekadar
+	 * menyembunyikan tombol tab: `tab` bisa terlanjur berisi nilai lain kalau
+	 * user berganti (mis. admin logout lalu kasir masuk tanpa reload).
+	 */
+	$effect(() => {
+		if (!isAdmin && tab !== 'umum') tab = 'umum';
+	});
 
 	let namaToko = $state($tokoInfo.nama);
 	let alamatToko = $state($tokoInfo.alamat);
@@ -64,12 +129,22 @@
 	let autoBackupError = $state('');
 	let autoBackupTersimpan = $state(false);
 
+	// Selain tab Umum, seluruh isi halaman ini admin-only — jadi datanya pun tidak
+	// perlu diambil untuk kasir.
 	onMount(async () => {
+		if (!isAdmin) {
+			loading = false;
+			return;
+		}
+
 		users = await listUsers();
 		loading = false;
-		if (isAdmin) {
-			autoBackupDir = await getAutoBackupDir();
+		try {
+			produkTanpaStok = await hitungBarangTanpaStok();
+		} catch (e) {
+			console.error('Gagal menghitung produk tanpa stok:', e);
 		}
+		autoBackupDir = await getAutoBackupDir();
 	});
 
 	function simpanToko(event: Event) {
@@ -81,6 +156,7 @@
 
 	function bukaModal() {
 		formError = '';
+		editId = null;
 		nama = '';
 		username = '';
 		password = '';
@@ -88,27 +164,52 @@
 		dialogEl?.showModal();
 	}
 
+	function bukaEdit(user: User) {
+		formError = '';
+		editId = user.id;
+		nama = user.nama;
+		username = user.username;
+		password = '';
+		role = user.role;
+		dialogEl?.showModal();
+	}
+
 	function tutupModal() {
 		dialogEl?.close();
 	}
 
-	async function tambah(event: Event) {
+	async function simpanUser(event: Event) {
 		event.preventDefault();
 		formError = '';
 
-		if (!nama.trim() || !username.trim() || !password) {
+		// Saat Edit, password boleh kosong (= tidak diganti).
+		if (!nama.trim() || !username.trim() || (editId === null && !password)) {
 			formError = 'Semua field wajib diisi';
 			return;
 		}
 
 		saving = true;
 		try {
-			if (!(await usernameTersedia(username.trim()))) {
+			if (!(await usernameTersedia(username.trim(), editId ?? undefined))) {
 				formError = 'Username sudah dipakai';
 				return;
 			}
 
-			await tambahUser({ nama: nama.trim(), username: username.trim(), password, role });
+			const data = { nama: nama.trim(), username: username.trim(), role };
+			if (editId === null) {
+				await tambahUser({ ...data, password });
+			} else {
+				const result = await ubahUser(editId, { ...data, password: password || undefined });
+				if (!result.ok) {
+					formError = result.error ?? 'Gagal menyimpan user';
+					return;
+				}
+				// Kalau yang diedit adalah diri sendiri, sidebar & hak akses harus ikut
+				// berubah sekarang — bukan menunggu login ulang.
+				if (editId === $currentUser?.id) {
+					currentUser.set({ id: editId, ...data });
+				}
+			}
 			users = await listUsers();
 			tutupModal();
 		} finally {
@@ -177,17 +278,23 @@
 		<button class="tab-btn" class:active={tab === 'umum'} onclick={() => (tab = 'umum')}>
 			Umum
 		</button>
-		<button class="tab-btn" class:active={tab === 'user'} onclick={() => (tab = 'user')}>
-			User
-		</button>
-		<button
-			class="tab-btn"
-			class:active={tab === 'sinkronisasi'}
-			onclick={() => (tab = 'sinkronisasi')}
-		>
-			Sinkronisasi
-		</button>
 		{#if isAdmin}
+			<button class="tab-btn" class:active={tab === 'produk'} onclick={() => (tab = 'produk')}>
+				Produk
+			</button>
+			<button class="tab-btn" class:active={tab === 'laporan'} onclick={() => (tab = 'laporan')}>
+				Laporan
+			</button>
+			<button class="tab-btn" class:active={tab === 'user'} onclick={() => (tab = 'user')}>
+				User
+			</button>
+			<button
+				class="tab-btn"
+				class:active={tab === 'sinkronisasi'}
+				onclick={() => (tab = 'sinkronisasi')}
+			>
+				Sinkronisasi
+			</button>
 			<button
 				class="tab-btn"
 				class:active={tab === 'keamanan'}
@@ -290,13 +397,88 @@
 		</section>
 	{/if}
 
-	{#if tab === 'user'}
+	{#if tab === 'produk' && isAdmin}
+		<section class="card section">
+			<h2>Stok Produk</h2>
+			<label class="setel">
+				<input
+					type="checkbox"
+					checked={$stokLonggar}
+					disabled={menyimpanStok}
+					onchange={(e) => gantiModeStok(e.currentTarget.checked, e.currentTarget)}
+				/>
+				<span>
+					<strong>Boleh jual walau stok habis</strong>
+					<span class="setel-desc">
+						{#if $stokLonggar}
+							Sedang aktif. Barang berstok 0 masih bisa masuk keranjang setelah kasir menyetujui
+							peringatannya, dan stok tidak wajib diisi saat menambah produk.
+						{:else}
+							Sedang mati — <strong>mode stok ketat</strong>. Barang berstok 0 atau yang stoknya
+							belum diisi ditolak, tidak bisa menjual melebihi stok, dan stok wajib diisi saat
+							menambah produk.
+						{/if}
+					</span>
+				</span>
+			</label>
+
+			<!--
+				Jumlah produk tanpa stok ditampilkan di KEDUA mode, bukan cuma saat ketat:
+				saat masih longgar ia jadi peringatan sebelum tombolnya dimatikan, saat
+				sudah ketat ia jadi daftar pekerjaan yang harus dibereskan.
+			-->
+			{#if produkTanpaStok > 0}
+				<p class="catatan">
+					{#if $stokLonggar}
+						<strong>{produkTanpaStok} produk</strong> stoknya belum diisi (tertulis "-" di Daftar
+						Produk). Kalau centang ini dimatikan, produk itu tidak bisa dijual sampai stoknya
+						diisi.
+					{:else}
+						<strong>{produkTanpaStok} produk</strong> stoknya belum diisi dan
+						<strong>sedang tidak bisa dijual</strong>. Isi stoknya lewat halaman Produk.
+					{/if}
+				</p>
+			{/if}
+		</section>
+	{/if}
+
+	{#if tab === 'laporan' && isAdmin}
+		<section class="card section">
+			<h2>Hak Akses Laporan</h2>
+			<label class="setel">
+				<input
+					type="checkbox"
+					checked={$laporanKasirHariIni}
+					disabled={menyimpanLaporan}
+					onchange={(e) => gantiHakAksesLaporan(e.currentTarget.checked, e.currentTarget)}
+				/>
+				<span>
+					<strong>Kasir hanya boleh melihat laporan hari ini</strong>
+					<span class="setel-desc">
+						{#if $laporanKasirHariIni}
+							Sedang aktif. User dengan role <strong>kasir</strong> cuma melihat tab "Hari Ini" dan
+							"Kas Bon"; Dashboard dan Keseluruhan disembunyikan, dan Export Excel-nya terkunci ke
+							hari ini.
+						{:else}
+							Sedang mati. User dengan role <strong>kasir</strong> melihat seluruh laporan —
+							termasuk omzet dan laba sepanjang waktu.
+						{/if}
+					</span>
+				</span>
+			</label>
+
+			<p class="catatan">
+				Admin tidak terpengaruh pengaturan ini — admin selalu melihat semua laporan. Perubahan
+				baru terasa di mesin lain setelah aplikasinya dibuka ulang.
+			</p>
+		</section>
+	{/if}
+
+	{#if tab === 'user' && isAdmin}
 		<section class="card section">
 			<div class="section-header">
 				<h2>Daftar User</h2>
-				{#if isAdmin}
-					<button onclick={bukaModal}>+ Tambah User</button>
-				{/if}
+				<button onclick={bukaModal}>+ Tambah User</button>
 			</div>
 
 			{#if listError}
@@ -309,27 +491,24 @@
 						<th>Nama</th>
 						<th>Username</th>
 						<th>Role</th>
-						{#if isAdmin}
-							<th></th>
-						{/if}
+						<th></th>
 					</tr>
 				</thead>
 				<tbody>
 					{#if loading}
-						<tr><td colspan={isAdmin ? 4 : 3} class="empty">Memuat data...</td></tr>
+						<tr><td colspan="4" class="empty">Memuat data...</td></tr>
 					{:else}
 						{#each users as user (user.id)}
 							<tr>
 								<td>{user.nama}</td>
 								<td>{user.username}</td>
 								<td class="role">{user.role}</td>
-								{#if isAdmin}
-									<td class="action">
-										<button onclick={() => hapus(user)} disabled={user.id === $currentUser?.id}>
-											Hapus
-										</button>
-									</td>
-								{/if}
+								<td class="action">
+									<button onclick={() => bukaEdit(user)}>Edit</button>
+									<button onclick={() => hapus(user)} disabled={user.id === $currentUser?.id}>
+										Hapus
+									</button>
+								</td>
 							</tr>
 						{/each}
 					{/if}
@@ -338,33 +517,31 @@
 		</section>
 	{/if}
 
-	{#if tab === 'sinkronisasi'}
+	{#if tab === 'sinkronisasi' && isAdmin}
 		<section class="card section">
 			<h2>Sinkronisasi Data</h2>
 			<p class="muted">Backup data ke cloud (Supabase) belum aktif — akan tersedia di fase berikutnya.</p>
 			<button disabled>Sinkronkan Sekarang</button>
 		</section>
 
-		{#if isAdmin}
-			<section class="card section">
-				<h2>Lokasi Auto-Backup</h2>
-				<p class="muted">
-					Setiap 7 hari, aplikasi otomatis membuat backup database ke folder ini (4 file terbaru
-					disimpan). Kalau folder ini tidak ditemukan lagi, backup akan otomatis dipindah ke
-					Documents/POS-Backup.
-				</p>
-				<div class="folder-row">
-					<input value={autoBackupDir} readonly placeholder="Documents/POS-Backup" />
-					<button onclick={pilihFolderBackup}>Pilih Folder</button>
-				</div>
-				{#if autoBackupError}
-					<p class="error">{autoBackupError}</p>
-				{/if}
-				{#if autoBackupTersimpan}
-					<span class="saved-hint">Tersimpan</span>
-				{/if}
-			</section>
-		{/if}
+		<section class="card section">
+			<h2>Lokasi Auto-Backup</h2>
+			<p class="muted">
+				Setiap 7 hari, aplikasi otomatis membuat backup database ke folder ini (4 file terbaru
+				disimpan). Kalau folder ini tidak ditemukan lagi, backup akan otomatis dipindah ke
+				Documents/POS-Backup.
+			</p>
+			<div class="folder-row">
+				<input value={autoBackupDir} readonly placeholder="Documents/POS-Backup" />
+				<button onclick={pilihFolderBackup}>Pilih Folder</button>
+			</div>
+			{#if autoBackupError}
+				<p class="error">{autoBackupError}</p>
+			{/if}
+			{#if autoBackupTersimpan}
+				<span class="saved-hint">Tersimpan</span>
+			{/if}
+		</section>
 	{/if}
 
 	{#if tab === 'keamanan' && isAdmin}
@@ -417,8 +594,8 @@
 </div>
 
 <dialog bind:this={dialogEl} onclose={() => (formError = '')}>
-	<form onsubmit={tambah}>
-		<h2>Tambah User</h2>
+	<form onsubmit={simpanUser}>
+		<h2>{editId === null ? 'Tambah User' : 'Edit User'}</h2>
 
 		<label for="nama">Nama</label>
 		<input id="nama" bind:value={nama} placeholder="mis. Wati" autofocus />
@@ -426,8 +603,14 @@
 		<label for="username">Username</label>
 		<input id="username" bind:value={username} placeholder="mis. wati" autocomplete="off" />
 
-		<label for="password">Password</label>
-		<input id="password" type="password" bind:value={password} autocomplete="new-password" />
+		<label for="password">{editId === null ? 'Password' : 'Password Baru'}</label>
+		<input
+			id="password"
+			type="password"
+			bind:value={password}
+			autocomplete="new-password"
+			placeholder={editId === null ? '' : 'Kosongkan kalau tidak diganti'}
+		/>
 
 		<label for="role">Role</label>
 		<select id="role" bind:value={role}>
@@ -442,7 +625,7 @@
 		<div class="dialog-actions">
 			<button type="button" onclick={tutupModal}>Batal</button>
 			<button type="submit" class="primary" disabled={saving}>
-				{saving ? 'Menyimpan...' : 'Tambah User'}
+				{saving ? 'Menyimpan...' : editId === null ? 'Tambah User' : 'Simpan'}
 			</button>
 		</div>
 	</form>
@@ -529,12 +712,51 @@
 
 	.action {
 		text-align: right;
+		white-space: nowrap;
+	}
+
+	.action button + button {
+		margin-left: 0.4rem;
 	}
 
 	.error {
 		color: var(--danger);
 		font-size: 0.85rem;
 		margin: 0 0 0.9rem 0;
+	}
+
+	.setel {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.7rem;
+		cursor: pointer;
+	}
+
+	.setel input[type='checkbox'] {
+		width: 1.1rem;
+		height: 1.1rem;
+		margin-top: 0.15rem;
+		flex-shrink: 0;
+		cursor: pointer;
+	}
+
+	.setel-desc {
+		display: block;
+		margin-top: 0.25rem;
+		font-size: 0.85rem;
+		line-height: 1.5;
+		color: var(--text-muted);
+	}
+
+	.catatan {
+		margin: 0.9rem 0 0 0;
+		padding: 0.7rem 0.85rem;
+		border: 1px solid var(--border);
+		border-left: 3px solid var(--warning, #b54708);
+		border-radius: 6px;
+		font-size: 0.85rem;
+		line-height: 1.5;
+		color: var(--text-muted);
 	}
 
 	.lepas-form {

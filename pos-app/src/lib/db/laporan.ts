@@ -18,14 +18,64 @@ const FILTER = "date(tanggal, 'localtime') BETWEEN $1 AND $2";
 
 type SumRow = { total: number | null; jumlah: number | null };
 
+type LabaRow = {
+	laba: number;
+	omzet_terhitung: number;
+	omzet_belum: number;
+	baris_belum: number;
+};
+
+type LabaRingkas = {
+	labaKotor: number;
+	omzetTerhitung: number;
+	omzetBelumTerhitung: number;
+	barisBelumTerhitung: number;
+};
+
 async function skalar(sql: string, p: Periode): Promise<SumRow> {
 	const db = await getDb();
 	const rows = await db.select<SumRow[]>(sql, [p.dari, p.sampai]);
 	return rows[0] ?? { total: 0, jumlah: 0 };
 }
 
+/**
+ * Laba kotor = (harga jual - harga beli) x jumlah, dijumlah dari baris transaksi.
+ *
+ * Baris yang harga belinya NULL SENGAJA tidak ikut dijumlah, bukan dianggap 0.
+ * Kalau dianggap 0, produk yang belum diisi harga belinya terbaca untung penuh dan
+ * angka labanya jauh di atas kenyataan — laporan yang salah arah begini lebih
+ * berbahaya daripada tidak ada laporan sama sekali.
+ *
+ * Karena itu nilai penjualan yang belum bisa dihitung labanya ikut dikembalikan,
+ * supaya halaman Laporan bisa menyebut berapa yang belum terhitung.
+ */
+async function labaPeriode(p: Periode): Promise<LabaRingkas> {
+	const db = await getDb();
+	const rows = await db.select<LabaRow[]>(
+		`SELECT
+		   COALESCE(SUM(CASE WHEN i.harga_beli IS NOT NULL
+		                     THEN (i.harga - i.harga_beli) * i.jumlah END), 0) AS laba,
+		   COALESCE(SUM(CASE WHEN i.harga_beli IS NOT NULL
+		                     THEN i.harga * i.jumlah END), 0) AS omzet_terhitung,
+		   COALESCE(SUM(CASE WHEN i.harga_beli IS NULL
+		                     THEN i.harga * i.jumlah END), 0) AS omzet_belum,
+		   COALESCE(SUM(CASE WHEN i.harga_beli IS NULL THEN 1 ELSE 0 END), 0) AS baris_belum
+		 FROM item_penjualan i
+		 JOIN penjualan p ON p.id = i.penjualan_id
+		 WHERE date(p.tanggal, 'localtime') BETWEEN $1 AND $2`,
+		[p.dari, p.sampai]
+	);
+	const r = rows[0];
+	return {
+		labaKotor: r?.laba ?? 0,
+		omzetTerhitung: r?.omzet_terhitung ?? 0,
+		omzetBelumTerhitung: r?.omzet_belum ?? 0,
+		barisBelumTerhitung: r?.baris_belum ?? 0
+	};
+}
+
 export async function ringkasanPeriode(p: Periode): Promise<Ringkasan> {
-	const [jual, bon, bayar] = await Promise.all([
+	const [jual, bon, bayar, laba] = await Promise.all([
 		skalar(
 			`SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS jumlah
 			 FROM penjualan WHERE ${FILTER}`,
@@ -40,7 +90,8 @@ export async function ringkasanPeriode(p: Periode): Promise<Ringkasan> {
 			`SELECT COALESCE(SUM(jumlah), 0) AS total, COUNT(*) AS jumlah
 			 FROM pembayaran_kasbon WHERE ${FILTER}`,
 			p
-		)
+		),
+		labaPeriode(p)
 	]);
 
 	const totalPenjualan = jual.total ?? 0;
@@ -52,7 +103,8 @@ export async function ringkasanPeriode(p: Periode): Promise<Ringkasan> {
 		rataRata: jumlahTransaksi > 0 ? Math.round(totalPenjualan / jumlahTransaksi) : 0,
 		bonBaru: bon.total ?? 0,
 		jumlahBon: bon.jumlah ?? 0,
-		bonDibayar: bayar.total ?? 0
+		bonDibayar: bayar.total ?? 0,
+		...laba
 	};
 }
 
@@ -147,7 +199,13 @@ export async function penjualanPerJam(p: Periode): Promise<TitikGrafik[]> {
 	});
 }
 
-type BarangRow = { nama: string; total_qty: number; total_nilai: number };
+type BarangRow = {
+	nama: string;
+	total_qty: number;
+	total_nilai: number;
+	/** NULL kalau tidak ada satu pun baris produk ini yang punya harga beli. */
+	total_laba: number | null;
+};
 
 /**
  * Dikelompokkan per `nama`, bukan `barang_id`: barang_id bisa NULL setelah produk
@@ -159,7 +217,9 @@ export async function barangTerlaris(p: Periode, limit = 10): Promise<BarangTerj
 	const rows = await db.select<BarangRow[]>(
 		`SELECT i.nama AS nama,
 		        SUM(i.jumlah) AS total_qty,
-		        SUM(i.harga * i.jumlah) AS total_nilai
+		        SUM(i.harga * i.jumlah) AS total_nilai,
+		        SUM(CASE WHEN i.harga_beli IS NOT NULL
+		                 THEN (i.harga - i.harga_beli) * i.jumlah END) AS total_laba
 		 FROM item_penjualan i
 		 JOIN penjualan p ON p.id = i.penjualan_id
 		 WHERE date(p.tanggal, 'localtime') BETWEEN $1 AND $2
@@ -172,7 +232,8 @@ export async function barangTerlaris(p: Periode, limit = 10): Promise<BarangTerj
 	return rows.map((r) => ({
 		nama: r.nama,
 		totalQty: r.total_qty,
-		totalNilai: r.total_nilai
+		totalNilai: r.total_nilai,
+		totalLaba: r.total_laba
 	}));
 }
 

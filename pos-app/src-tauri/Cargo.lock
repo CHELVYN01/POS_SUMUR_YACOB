@@ -3088,7 +3088,7 @@ dependencies = [
 
 [[package]]
 name = "pos-app"
-version = "0.1.8"
+version = "0.1.11"
 dependencies = [
  "argon2",
  "base64 0.22.1",
